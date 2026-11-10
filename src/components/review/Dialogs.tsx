@@ -92,13 +92,26 @@ export function ShareDialog({ assetId, onClose }: { assetId: string; onClose: ()
             <label className="flex items-center gap-1.5">
               <input type="checkbox" checked={l.allow_download} onChange={(e) => patch(l, { allow_download: e.target.checked })} /> Downloads
             </label>
+            <label className="flex items-center gap-1.5">
+              <input type="checkbox" checked={l.allow_approval} onChange={(e) => patch(l, { allow_approval: e.target.checked })} /> Can approve
+            </label>
+            <label className="flex items-center gap-1.5 text-ink-2">
+              Expires
+              <input
+                type="date"
+                className="input w-auto py-0.5 text-xs"
+                value={l.expires_at ? l.expires_at.slice(0, 10) : ""}
+                min={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => patch(l, { expires_at: e.target.value ? new Date(e.target.value + "T23:59:59").toISOString() : null })}
+              />
+            </label>
             <button className="btn btn-ghost btn-sm ml-auto text-cut" onClick={() => confirm("Revoke this link? Guests lose access immediately.") && patch(l, { revoked_at: new Date().toISOString() })}>
               Revoke
             </button>
           </div>
           {grants.filter((g) => g.share_link_id === l.id).length > 0 && (
             <p className="text-xs text-ink-3">
-              Joined: {grants.filter((g) => g.share_link_id === l.id).map((g) => g.display_name).join(", ")}
+              Joined: {[...new Set(grants.filter((g) => g.share_link_id === l.id).map((g) => g.display_name))].join(", ")}
             </p>
           )}
         </div>

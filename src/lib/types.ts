@@ -25,6 +25,10 @@ export type Version = {
   drop_frame: boolean;
   is_vfr: boolean;
   audio_codec: string | null;
+  review_status: "not_needed" | "pending" | "ready" | "failed";
+  review_key: string | null;
+  review_bytes: number | null;
+  review_first_pts: number;
   created_at: string;
 };
 
@@ -46,6 +50,7 @@ export type Comment = {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+  done_in_version_id: string | null;
   /** client-only: not yet confirmed by the server */
   pending?: boolean;
 };
@@ -57,10 +62,29 @@ export type ShareLink = {
   label: string | null;
   allow_comments: boolean;
   allow_download: boolean;
+  allow_approval: boolean;
+  expires_at: string | null;
   revoked_at: string | null;
   created_at: string;
 };
 
-export type Access = { role: "editor" | "guest"; display_name: string; allow_comments: boolean; allow_download: boolean };
+export type Access = {
+  role: "editor" | "guest";
+  display_name: string;
+  allow_comments: boolean;
+  allow_download: boolean;
+  allow_approval: boolean;
+};
+
+export type Approval = {
+  id: string;
+  version_id: string;
+  user_id: string;
+  author_name: string;
+  author_role: "editor" | "guest";
+  decision: "approved" | "changes_requested";
+  note: string;
+  created_at: string;
+};
 
 export const versionRate = (v: Pick<Version, "fps_num" | "fps_den">): Rate => ({ num: v.fps_num, den: v.fps_den });

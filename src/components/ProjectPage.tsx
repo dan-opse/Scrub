@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { supabase, errorMessage } from "@/lib/client/supabase";
+import { supabase, api, errorMessage } from "@/lib/client/supabase";
 import { useEditorSession } from "./useEditorSession";
 import { TopBar } from "./ProjectsPage";
 import { UploadPanel } from "./UploadPanel";
@@ -12,33 +12,41 @@ type AssetRow = {
   id: string;
   name: string;
   created_at: string;
-  versions: { id: string; number: number; status: string; created_at: string }[];
+  versions: { id: string; number: number; status: string; review_status: string; original_bytes: number; review_bytes: number | null; created_at: string }[];
 };
+
+const mb = (b: number) => (b >= 2 ** 30 ? `${(b / 2 ** 30).toFixed(2)} GB` : `${Math.round(b / 2 ** 20)} MB`);
 
 export function ProjectPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const user = useEditorSession();
   const [project, setProject] = useState<Project | null>(null);
+  const [allProjects, setAllProjects] = useState<Project[]>([]);
   const [assets, setAssets] = useState<AssetRow[] | null>(null);
   const [counts, setCounts] = useState<Record<string, { notes: number; cuts: number }>>({});
+  const [approvals, setApprovals] = useState<Record<string, { decision: string; author_name: string }>>({});
   const [uploading, setUploading] = useState(false);
   const [editingTc, setEditingTc] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const sb = supabase();
-    const [{ data: p, error: pe }, { data: a, error: ae }] = await Promise.all([
+    const [{ data: p, error: pe }, { data: a, error: ae }, { data: all }] = await Promise.all([
       sb.from("projects").select("*").eq("id", id).single(),
       sb
         .from("assets")
-        .select("id, name, created_at, versions(id, number, status, created_at)")
+        .select("id, name, created_at, versions(id, number, status, review_status, original_bytes, review_bytes, created_at)")
         .eq("project_id", id)
         .is("deleted_at", null)
         .order("created_at", { ascending: false }),
+      sb.from("projects").select("*").is("deleted_at", null).order("name"),
     ]);
     if (pe || ae) return setError(errorMessage(pe ?? ae));
     setProject(p);
+    setAllProjects((all ?? []) as Project[]);
     setAssets(a as AssetRow[]);
     const latest = (a as AssetRow[]).map((x) => [...x.versions].sort((m, n) => n.number - m.number)[0]?.id).filter(Boolean);
     if (latest.length) {
@@ -56,12 +64,17 @@ export function ProjectPage() {
         else k.notes++;
       }
       setCounts(byVersion);
+      const { data: aps } = await sb.from("approvals").select("version_id, decision, author_name, created_at").in("version_id", latest).order("created_at", { ascending: false });
+      const latestByVersion: Record<string, { decision: string; author_name: string }> = {};
+      for (const ap of aps ?? []) if (!latestByVersion[ap.version_id]) latestByVersion[ap.version_id] = ap;
+      setApprovals(latestByVersion);
     }
   }, [id]);
 
   useEffect(() => {
+    if (!user) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- data fetch; state is set after the await
-    if (user) load();
+    load().catch(() => undefined);
   }, [user, load]);
 
   async function saveTc(tc: string) {
@@ -71,11 +84,46 @@ export function ProjectPage() {
     setEditingTc(false);
   }
 
+  async function renameAsset(assetId: string, name: string) {
+    setRenaming(null);
+    if (!name.trim()) return;
+    const { error } = await supabase().from("assets").update({ name: name.trim() }).eq("id", assetId);
+    if (error) return setError(errorMessage(error));
+    load();
+  }
+
+  async function moveAsset(assetId: string, projectId: string) {
+    if (projectId === id) return;
+    const { error } = await supabase().from("assets").update({ project_id: projectId }).eq("id", assetId);
+    if (error) return setError(errorMessage(error));
+    load();
+  }
+
+  async function deleteAsset(a: AssetRow) {
+    if (!confirm(`Delete "${a.name}" and all ${a.versions.length} version${a.versions.length === 1 ? "" : "s"}? Share links stop working immediately.`)) return;
+    try {
+      await api("/api/assets/delete", { assetId: a.id });
+      load();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
+  async function deleteVersion(a: AssetRow, v: AssetRow["versions"][number]) {
+    if (!confirm(`Delete v${v.number} of "${a.name}" and its comments?`)) return;
+    try {
+      await api("/api/versions/delete", { versionId: v.id });
+      load();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
   return (
     <>
       <TopBar>
         <span className="text-ink-3">/</span>
-        <span>{project?.name}</span>
+        <span className="truncate">{project?.name}</span>
       </TopBar>
       <main className="mx-auto w-full max-w-4xl space-y-5 p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -122,25 +170,87 @@ export function ProjectPage() {
         ) : (
           <ul className="divide-y divide-line rounded-lg border border-line">
             {assets.map((a) => {
-              const latest = [...a.versions].sort((m, n) => n.number - m.number)[0];
+              const versions = [...a.versions].sort((m, n) => n.number - m.number);
+              const latest = versions[0];
               const c = latest ? counts[latest.id] : undefined;
+              const open = expanded === a.id;
               return (
-                <li key={a.id}>
-                  <Link href={`/assets/${a.id}`} className="flex items-center justify-between gap-4 p-4 hover:bg-panel">
-                    <div>
-                      <div className="font-medium">{a.name}</div>
-                      <div className="text-sm text-ink-3">
-                        {latest ? `v${latest.number}` : "no versions"}
-                        {latest?.status === "uploading" && " · upload unfinished"}
-                      </div>
+                <li key={a.id} className="group">
+                  <div className="flex items-center gap-3 p-4 hover:bg-panel">
+                    <div className="min-w-0 flex-1">
+                      {renaming === a.id ? (
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            renameAsset(a.id, new FormData(e.currentTarget).get("name") as string);
+                          }}
+                        >
+                          <input name="name" className="input" defaultValue={a.name} autoFocus onBlur={(e) => renameAsset(a.id, e.target.value)} />
+                        </form>
+                      ) : (
+                        <Link href={`/assets/${a.id}`} className="block">
+                          <div className="truncate font-medium">{a.name}</div>
+                          <div className="flex flex-wrap items-center gap-2 text-sm text-ink-3">
+                            <span>
+                              {latest ? `v${latest.number}` : "no versions"}
+                              {latest?.status === "uploading" && " · upload unfinished"}
+                              {latest?.review_status === "pending" && " · review copy pending"}
+                            </span>
+                            {latest && approvals[latest.id] && (
+                              <span className={`rounded px-1.5 text-xs ${approvals[latest.id].decision === "approved" ? "bg-good/20 text-good" : "bg-accent/20 text-accent"}`}>
+                                {approvals[latest.id].decision === "approved" ? "Approved" : "Changes requested"} · {approvals[latest.id].author_name}
+                              </span>
+                            )}
+                            {c && c.notes > 0 && <span className="text-note">{c.notes} open comment{c.notes === 1 ? "" : "s"}</span>}
+                            {c && c.cuts > 0 && <span className="text-cut">{c.cuts} cut request{c.cuts === 1 ? "" : "s"}</span>}
+                          </div>
+                        </Link>
+                      )}
                     </div>
-                    {c && (
-                      <div className="flex gap-3 text-sm">
-                        {c.notes > 0 && <span className="text-note">{c.notes} open comment{c.notes === 1 ? "" : "s"}</span>}
-                        {c.cuts > 0 && <span className="text-cut">{c.cuts} cut request{c.cuts === 1 ? "" : "s"}</span>}
-                      </div>
-                    )}
-                  </Link>
+                    <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                      <button className="btn btn-ghost btn-sm" onClick={() => setRenaming(a.id)}>
+                        Rename
+                      </button>
+                      {allProjects.length > 1 && (
+                        <select
+                          className="input w-auto py-1 text-xs"
+                          value={id}
+                          onChange={(e) => moveAsset(a.id, e.target.value)}
+                          aria-label={`Move ${a.name} to project`}
+                          title="Move to another project"
+                        >
+                          {allProjects.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.id === id ? "Move to…" : p.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      <button className="btn btn-ghost btn-sm" onClick={() => setExpanded(open ? null : a.id)} aria-expanded={open}>
+                        {versions.length} version{versions.length === 1 ? "" : "s"} {open ? "▾" : "▸"}
+                      </button>
+                      <button className="btn btn-ghost btn-sm text-ink-3 hover:text-cut" onClick={() => deleteAsset(a)}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                  {open && (
+                    <ul className="space-y-1 border-t border-line bg-bg px-4 py-2 text-sm">
+                      {versions.map((v) => (
+                        <li key={v.id} className="flex items-center gap-3">
+                          <span className="font-mono text-ink-2">v{v.number}</span>
+                          <span className="text-ink-3">
+                            {new Date(v.created_at).toLocaleDateString()} · {mb(Number(v.original_bytes) + Number(v.review_bytes ?? 0))}
+                            {v.status !== "ready" && ` · ${v.status}`}
+                            {v.review_status === "ready" && " · has review copy"}
+                          </span>
+                          <button className="btn btn-ghost btn-sm ml-auto text-ink-3 hover:text-cut" onClick={() => deleteVersion(a, v)}>
+                            Delete v{v.number}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </li>
               );
             })}

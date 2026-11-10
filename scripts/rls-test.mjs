@@ -69,6 +69,25 @@ check("guest cannot create share links", !!linkErr);
 const { error: verErr } = await guest.from("versions").insert({ asset_id: assetId, original_filename: "x.mp4", original_bytes: 1, fps_num: 24, fps_den: 1, frame_count: 10 });
 check("guest cannot add versions", !!verErr);
 
+// Approvals: guest with the right can approve; the right can be removed per link; strangers never can.
+const { data: access } = await guest.rpc("my_asset_access", { p_asset: assetId });
+check("my_asset_access reports approval right", access?.[0]?.allow_approval === true, JSON.stringify(access));
+const { error: apErr, data: apRow } = await guest.from("approvals").insert({ version_id: v.id, decision: "changes_requested", note: "rls test", author_name: "Editor", author_role: "editor" }).select("author_role, author_name").single();
+check("guest can request changes", !apErr, apErr?.message);
+check("approval author cannot be forged", apRow?.author_role === "guest" && apRow?.author_name === "RLS Tester", JSON.stringify(apRow));
+const { error: strangerAp } = await stranger.from("approvals").insert({ version_id: v.id, decision: "approved" });
+check("stranger cannot approve", !!strangerAp);
+const { data: strangerAps } = await stranger.from("approvals").select("*").eq("version_id", v.id);
+check("stranger cannot read approvals", (strangerAps ?? []).length === 0);
+const { error: evErr } = await guest.from("events").insert({ kind: "rls_test", version_id: v.id, data: {} });
+check("guest can log an event", !evErr, evErr?.message);
+const { data: evRows } = await guest.from("events").select("*");
+check("guest cannot read events", (evRows ?? []).length === 0);
+const { error: resolveErr } = await guest.rpc("resolve_cut_requests", { p_version: v.id, p_done: [others[0].id], p_rejected: [] });
+check("guest cannot resolve cut requests across versions", !!resolveErr);
+const { data: storageBytes, error: stErr } = await guest.rpc("my_storage_bytes");
+check("guest storage usage is zero", !stErr && Number(storageBytes) === 0, `${stErr?.message} ${storageBytes}`);
+
 // Playback signing through our API as the stranger must fail.
 const { data: s } = await stranger.auth.getSession();
 const res = await fetch("http://localhost:3000/api/playback", {

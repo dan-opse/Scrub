@@ -14,14 +14,17 @@ export async function uploadVersion(
   versionId: string,
   onProgress: (p: UploadProgress) => void,
   signal: AbortSignal,
+  kind: "original" | "review" = "original",
+  extra: Record<string, unknown> = {},
 ): Promise<void> {
-  const { partSize, resumed } = await api<{ partSize: number; resumed: boolean }>("/api/uploads/start", { versionId });
+  const { partSize, resumed } = await api<{ partSize: number; resumed: boolean }>("/api/uploads/start", { versionId, kind, bytes: file.size });
   const totalParts = Math.max(1, Math.ceil(file.size / partSize));
 
   const done = new Map<number, string>();
   if (resumed) {
     const { parts } = await api<{ parts: { partNumber: number; etag: string; size: number }[] }>("/api/uploads/parts", {
       versionId,
+      kind,
     });
     for (const p of parts) {
       const expected = p.partNumber === totalParts ? file.size - (totalParts - 1) * partSize : partSize;
@@ -49,6 +52,7 @@ export async function uploadVersion(
     const batch = [n, ...queue.slice(0, 19)].filter((x, i, a) => a.indexOf(x) === i);
     const { urls } = await api<{ urls: { partNumber: number; url: string }[] }>("/api/uploads/sign", {
       versionId,
+      kind,
       partNumbers: batch,
     });
     for (const u of urls) urlCache.set(u.partNumber, u.url);
@@ -83,7 +87,7 @@ export async function uploadVersion(
   );
 
   const parts: Part[] = [...done.entries()].map(([partNumber, etag]) => ({ partNumber, etag }));
-  await api("/api/uploads/complete", { versionId, parts });
+  await api("/api/uploads/complete", { versionId, kind, parts, ...extra });
 }
 
 /** PUT with upload progress. fetch() can't report upload progress, so this uses XHR. */

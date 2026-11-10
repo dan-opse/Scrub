@@ -9,6 +9,7 @@ export type PreviewPreset = "everyone" | "mine" | "accepted";
 type Props = {
   tab: Tab;
   setTab: (t: Tab) => void;
+  earlier?: React.ReactNode;
   items: Comment[]; // top-level, sorted
   replies: Map<string, Comment[]>;
   me: { id: string; role: "editor" | "guest" };
@@ -83,6 +84,7 @@ export function Sidebar(p: Props) {
       )}
 
       <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+        {p.tab !== "notes" && p.earlier && <li className="list-none">{p.earlier}</li>}
         {shown.length === 0 && (
           <li className="p-4 text-center text-sm text-ink-3">
             {p.tab === "cuts"

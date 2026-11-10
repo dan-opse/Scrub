@@ -19,7 +19,18 @@ export const BUCKET = process.env.S3_BUCKET!;
 export const PART_SIZE = 16 * 1024 * 1024; // R2 requires equal-size parts except the last
 export const PLAYBACK_TTL_SECONDS = 2 * 60 * 60;
 
+export const MAX_FILE_BYTES = 50 * 1024 * 1024 * 1024;
+export const STORAGE_ALLOWANCE_BYTES = Number(process.env.STORAGE_ALLOWANCE_GB ?? 10) * 1024 * 1024 * 1024;
+
 export const originalKey = (assetId: string, versionId: string, filename: string) => {
   const ext = /\.mov$/i.test(filename) ? "mov" : "mp4";
   return `assets/${assetId}/versions/${versionId}/original.${ext}`;
 };
+export const reviewKey = (assetId: string, versionId: string) => `assets/${assetId}/versions/${versionId}/review.mp4`;
+
+export type UploadKind = "original" | "review";
+/** The column names for each kind of object a version holds. */
+export const cols = (kind: UploadKind) =>
+  kind === "review"
+    ? { key: "review_key", uploadId: "review_upload_id", bytes: "review_bytes" }
+    : { key: "original_key", uploadId: "upload_id", bytes: "original_bytes" };

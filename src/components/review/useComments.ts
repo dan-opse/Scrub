@@ -86,6 +86,7 @@ export function useComments(versionId: string | null) {
         created_at: now,
         updated_at: now,
         deleted_at: null,
+        done_in_version_id: null,
         pending: true,
       };
       setComments((p) => [...p, optimistic]);

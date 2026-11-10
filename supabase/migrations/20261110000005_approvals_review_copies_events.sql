@@ -66,32 +66,31 @@ create trigger approvals_before_insert before insert on public.approvals
   for each row execute function public.approvals_before_insert();
 revoke execute on function public.approvals_before_insert() from public, anon, authenticated;
 
--- active_grant and my_asset_access now report approval rights too
-drop function public.my_asset_access(uuid);
-drop function public.active_grant(uuid);
-create function public.active_grant(p_asset uuid)
-returns table (share_link_id uuid, display_name text, allow_comments boolean, allow_download boolean, allow_approval boolean)
+-- my_asset_access now reports approval rights too (active_grant stays as-is: policies depend on it)
+create or replace function public.grant_allows_approval(p_asset uuid) returns boolean
 language sql stable security definer set search_path = '' as $$
-  select g.share_link_id, g.display_name, l.allow_comments, l.allow_download, l.allow_approval
-  from public.share_link_grants g join public.share_links l on l.id = g.share_link_id
-  where l.asset_id = p_asset and g.user_id = auth.uid()
-    and l.revoked_at is null and (l.expires_at is null or l.expires_at > now())
-  order by g.created_at desc limit 1;
+  select coalesce((
+    select l.allow_approval
+    from public.share_link_grants g join public.share_links l on l.id = g.share_link_id
+    where l.asset_id = p_asset and g.user_id = auth.uid()
+      and l.revoked_at is null and (l.expires_at is null or l.expires_at > now())
+    order by g.created_at desc limit 1), false);
 $$;
+drop function public.my_asset_access(uuid);
 create function public.my_asset_access(p_asset uuid)
 returns table (role text, display_name text, allow_comments boolean, allow_download boolean, allow_approval boolean)
 language sql stable security definer set search_path = '' as $$
   select 'editor', coalesce((select display_name from public.profiles where id = auth.uid()), 'Editor'), true, true, true
   where public.is_asset_owner(p_asset)
   union all
-  select 'guest', g.display_name, g.allow_comments, g.allow_download, g.allow_approval
+  select 'guest', g.display_name, g.allow_comments, g.allow_download, public.grant_allows_approval(p_asset)
   from public.active_grant(p_asset) g
   where not public.is_asset_owner(p_asset)
   limit 1;
 $$;
-revoke execute on function public.active_grant(uuid) from public, anon;
+revoke execute on function public.grant_allows_approval(uuid) from public, anon;
 revoke execute on function public.my_asset_access(uuid) from public, anon;
-grant execute on function public.active_grant(uuid) to authenticated;
+grant execute on function public.grant_allows_approval(uuid) to authenticated;
 grant execute on function public.my_asset_access(uuid) to authenticated;
 
 -- ---------------------------------------------------------------- events (metrics: playback failures, upload failures)

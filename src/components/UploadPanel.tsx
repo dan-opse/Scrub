@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { supabase, api, errorMessage } from "@/lib/client/supabase";
 import { probeFile, type Probe } from "@/lib/client/probe";
 import { uploadVersion, type UploadProgress } from "@/lib/client/uploader";
+import { makeReviewCopy, needsReviewCopy, type ReviewCopyPhase } from "@/lib/client/reviewCopy";
+import { readTimecodeTrack } from "@/lib/client/timecodeTrack";
 import { canDropFrame, timecodeToFrames, fps } from "@/lib/timecode";
 
 type Props = {
@@ -26,13 +28,14 @@ export function UploadPanel({ projectId, defaultStartTc, assetId, resume, onDone
   const [startTc, setStartTc] = useState(defaultStartTc);
   const [dropFrame, setDropFrame] = useState(defaultStartTc.includes(";"));
   const [progress, setProgress] = useState<UploadProgress | null>(null);
-  const [phase, setPhase] = useState<"pick" | "review" | "uploading" | "stalled">("pick");
+  const [phase, setPhase] = useState<"pick" | "review" | "uploading" | "stalled" | "copy">("pick");
+  const [copy, setCopy] = useState<{ phase: ReviewCopyPhase; fraction: number } | null>(null);
   const abort = useRef<AbortController | null>(null);
   const versionRef = useRef<{ versionId: string; assetId: string } | null>(null);
 
   // Keep the screen awake and warn before leaving while bytes are in flight.
   useEffect(() => {
-    if (phase !== "uploading") return;
+    if (phase !== "uploading" && phase !== "copy") return;
     let lock: WakeLockSentinel | null = null;
     navigator.wakeLock?.request("screen").then((l) => (lock = l)).catch(() => undefined);
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
@@ -43,8 +46,18 @@ export function UploadPanel({ projectId, defaultStartTc, assetId, resume, onDone
     };
   }, [phase]);
 
+  const [tcSource, setTcSource] = useState<"file" | "project">("project");
+  const [quota, setQuota] = useState<{ used: number; allowance: number; maxFile: number } | null>(null);
+  useEffect(() => {
+    api<{ used: number; allowance: number; maxFile: number }>("/api/storage", {}).then(setQuota).catch(() => undefined);
+  }, []);
+
   async function pick(f: File) {
     setError(null);
+    if (f.size > (quota?.maxFile ?? 50 * 2 ** 30)) return setError(`Files are limited to 50 GB (this one is ${mb(f.size)}).`);
+    if (quota && !resume && quota.used + f.size > quota.allowance) {
+      return setError(`Not enough storage: ${mb(quota.used)} of ${mb(quota.allowance)} used, this file needs ${mb(f.size)}. Delete old versions first.`);
+    }
     if (resume && (f.name !== resume.filename || f.size !== resume.bytes)) {
       setError(`To resume, drop the same file: ${resume.filename} (${mb(resume.bytes)}).`);
       return;
@@ -55,6 +68,12 @@ export function UploadPanel({ projectId, defaultStartTc, assetId, resume, onDone
     try {
       const p = await probeFile(f, setProbing);
       setProbe(p);
+      const tc = await readTimecodeTrack(f);
+      if (tc) {
+        setStartTc(tc.timecode);
+        setDropFrame(tc.dropFrame);
+        setTcSource("file");
+      }
       setPhase("review");
       if (resume) start(f, p);
     } catch (e) {
@@ -101,6 +120,7 @@ export function UploadPanel({ projectId, defaultStartTc, assetId, resume, onDone
             drop_frame: dropFrame && canDropFrame(p.rate),
             is_vfr: p.isVfr,
             audio_codec: p.audioCodec,
+            review_status: needsReviewCopy(p) ? "pending" : "not_needed",
           })
           .select("id")
           .single();
@@ -111,11 +131,27 @@ export function UploadPanel({ projectId, defaultStartTc, assetId, resume, onDone
       setPhase("uploading");
       abort.current = new AbortController();
       await uploadVersion(f, ids.versionId, setProgress, abort.current.signal);
+      if (needsReviewCopy(p)) {
+        // Clients whose computer can't decode this file get an H.264 copy, made right here.
+        setPhase("copy");
+        try {
+          await makeReviewCopy(f, p, ids.versionId, (ph, fr) => setCopy({ phase: ph, fraction: fr }), abort.current.signal);
+        } catch (e) {
+          if ((e as Error).name === "AbortError") return;
+          await sb.from("versions").update({ review_status: "failed" }).eq("id", ids.versionId);
+          setError(`Uploaded, but the H.264 review copy failed: ${errorMessage(e)} You can retry from the video page.`);
+          setPhase("stalled");
+          setTimeout(() => onDone(ids!.assetId), 4000);
+          return;
+        }
+      }
       onDone(ids.assetId);
     } catch (e) {
       if ((e as Error).name === "AbortError") return;
       setError(errorMessage(e));
       setPhase(versionRef.current || resume ? "stalled" : "review");
+      const vid = versionRef.current?.versionId ?? resume?.versionId ?? null;
+      sb.from("events").insert({ kind: "upload_failed", version_id: vid, data: { message: errorMessage(e), bytes: f.size } }).then(() => undefined);
     }
   }
 
@@ -184,7 +220,7 @@ export function UploadPanel({ projectId, defaultStartTc, assetId, resume, onDone
                 </label>
               )}
               <p className="pb-2 text-xs text-ink-3">
-                Match your timeline&apos;s start (usually 01:00:00:00) so exported markers line up.
+                {tcSource === "file" ? "Read from the file's timecode track." : "Match your timeline's start (usually 01:00:00:00) so exported markers line up."}
               </p>
             </div>
           )}
@@ -205,6 +241,20 @@ export function UploadPanel({ projectId, defaultStartTc, assetId, resume, onDone
             <span>{phase === "stalled" ? "Paused" : eta !== null ? `${Math.floor(eta / 60)}m ${eta % 60}s left` : ""}</span>
           </div>
           {phase === "uploading" && <p className="text-xs text-ink-3">Keep this tab open. If it closes, drop the same file again to resume.</p>}
+        </div>
+      )}
+
+      {phase === "copy" && copy && (
+        <div className="space-y-1">
+          <div className="h-2 overflow-hidden rounded bg-panel-2">
+            <div className="h-full bg-note transition-[width]" style={{ width: `${copy.fraction * 100}%` }} />
+          </div>
+          <p className="text-xs text-ink-2">
+            {copy.phase === "converting" && `Making an H.264 review copy so every client can play this… ${Math.round(copy.fraction * 100)}%`}
+            {copy.phase === "checking" && "Checking the copy frame for frame…"}
+            {copy.phase === "uploading" && `Uploading the review copy… ${Math.round(copy.fraction * 100)}%`}
+          </p>
+          <p className="text-xs text-ink-3">The original is already uploaded and shareable. Keep this tab open until the copy finishes.</p>
         </div>
       )}
 
