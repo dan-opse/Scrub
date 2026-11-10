@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+/* Scrub is a dark, editor-style tool: the video is the brightest thing on screen. */
+:root {
+  --bg: #0d0e10;
+  --panel: #15171a;
+  --panel-2: #1c1f23;
+  --line: #2a2e34;
+  --line-2: #363b42;
+  --ink: #e8eaed;
+  --ink-2: #a3a9b1;
+  --ink-3: #6f7680;
+  --accent: #f5b544;
+  --note: #4cb2f0;
+  --cut: #ef5350;
+  --good: #4caf7d;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-note: var(--note);
+  --color-cut: var(--cut);
+  --color-good: var(--good);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-size: 14px;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border border-line-2 bg-panel-2 px-3 py-1.5 text-sm text-ink transition-colors hover:border-ink-3 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply border-accent bg-accent font-medium text-black hover:brightness-110;
+  }
+  .btn-cut {
+    @apply border-cut bg-cut font-medium text-white hover:brightness-110;
+  }
+  .btn-ghost {
+    @apply border-transparent bg-transparent hover:bg-panel-2;
+  }
+  .btn-sm {
+    @apply px-2 py-1 text-xs;
+  }
+  .input {
+    @apply w-full rounded-md border border-line-2 bg-bg px-2.5 py-1.5 text-sm text-ink outline-none placeholder:text-ink-3 focus:border-accent;
+  }
+  .card {
+    @apply rounded-lg border border-line bg-panel;
+  }
+  .kbd {
+    @apply rounded border border-line-2 bg-panel-2 px-1 font-mono text-[11px] text-ink-2;
+  }
+  .label {
+    @apply text-xs font-medium uppercase tracking-wide text-ink-3;
+  }
+}
+
+/* Cut-request stripes: status is never shown by colour alone. */
+.cut-stripes {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--cut) 55%, transparent) 0 4px,
+    color-mix(in srgb, var(--cut) 20%, transparent) 4px 8px
+  );
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

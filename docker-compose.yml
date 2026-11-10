@@ -1,0 +1,17 @@
+# Local S3-compatible storage standing in for Cloudflare R2 during development.
+# Start with: docker compose up -d   then: npm run storage:init
+services:
+  s3:
+    image: rustfs/rustfs:latest
+    ports:
+      - "9000:9000"
+    environment:
+      RUSTFS_ACCESS_KEY: scrubdev
+      RUSTFS_SECRET_KEY: scrubdev-secret
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_VOLUMES: /data
+    volumes:
+      - s3-data:/data
+
+volumes:
+  s3-data:
