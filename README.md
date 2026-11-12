@@ -80,7 +80,7 @@ Route handlers act as the caller (their Supabase JWT), so row-level security dec
 
 Live at **https://scrub-hazel.vercel.app** (Vercel project `scrub`, Hobby plan). Video files are in the Cloudflare R2 bucket `scrub-videos`; data is in the Supabase project `scrub`.
 
-- Deploy: `npx vercel deploy --prod` (or push to GitHub once the repo is connected to the Vercel project).
+- Deploy: push to `main` on GitHub; Vercel builds and deploys automatically. Other branches get preview deployments.
 - Environment variables are set in Vercel for production and preview: the two `NEXT_PUBLIC_SUPABASE_*` values, `S3_ENDPOINT`, `S3_REGION=auto`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET`, `S3_FORCE_PATH_STYLE=false`, `STORAGE_ALLOWANCE_GB`.
 - R2's CORS policy (set in the Cloudflare dashboard, bucket → Settings) must allow the app's origin(s), methods GET/HEAD/PUT, headers Content-Type and Range, and expose ETag, Content-Length, Content-Range, Accept-Ranges. Add any custom domain there.
-- Local development (`npm run dev`) now uses the same R2 bucket and Supabase project as production. To work offline against local RustFS instead, use the storage settings in `.env.local.bak-local`.
+- Local development (`npm run dev`) now uses the same R2 bucket and Supabase project as production. (The local RustFS setup in `docker-compose.yml` is no longer used; its data was deleted.)
