@@ -23,6 +23,7 @@
     "server-only": "^0.0.1"
   },
   "devDependencies": {
+    "@aws-sdk/lib-storage": "^3.1167.0",
     "@tailwindcss/turbopack": "^4",
     "@types/node": "^24.19.2",
     "@types/react": "^19",
