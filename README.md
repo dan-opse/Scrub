@@ -17,10 +17,12 @@ npm run dev                 # http://localhost:3000
 
 `.env.local` holds the Supabase project URL and publishable key, storage settings, and the optional `STORAGE_ALLOWANCE_GB` (default 10). It is not committed.
 
+Sign-in: you (the editor) sign in with a username and password; the username is stored internally as `<username>@scrub.local`, which never receives mail. Clients never sign in — they open a share link and type a name.
+
 Supabase settings this app needs (Dashboard → Authentication → Sign In / Providers):
 
 - **Allow anonymous sign-ins: ON** — clients join share links without accounts.
-- **Confirm email** — turned off for local testing; turn it back on before real use.
+- **Confirm email: OFF** — usernames map to internal addresses, so confirmation mail could never arrive.
 
 Database migrations live in `supabase/migrations/` and have been applied to the hosted project.
 

@@ -3,10 +3,16 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, errorMessage } from "@/lib/client/supabase";
 
+// Editors sign in with a username. The auth service needs an address-shaped identifier,
+// so the username is mapped to an internal one; nothing is ever sent to it.
+const USERNAME_DOMAIN = "scrub.local";
+const toAddress = (username: string) => `${username.trim().toLowerCase()}@${USERNAME_DOMAIN}`;
+const USERNAME_OK = /^[a-z0-9][a-z0-9._-]{1,31}$/i;
+
 export function SignIn() {
   const router = useRouter();
   const [mode, setMode] = useState<"in" | "up">("in");
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -21,19 +27,26 @@ export function SignIn() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (!USERNAME_OK.test(username.trim())) {
+      return setMsg("Usernames are 2–32 letters, numbers, dots, dashes or underscores.");
+    }
     setBusy(true);
     setMsg(null);
     const sb = supabase();
     // A guest session in this browser must not leak into the editor account.
     const { data: s } = await sb.auth.getSession();
     if (s.session?.user.is_anonymous) await sb.auth.signOut();
+    const email = toAddress(username);
     const res =
       mode === "in"
         ? await sb.auth.signInWithPassword({ email, password })
-        : await sb.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin } });
+        : await sb.auth.signUp({ email, password });
     setBusy(false);
-    if (res.error) return setMsg(errorMessage(res.error));
-    if (mode === "up" && !res.data.session) return setMsg("Check your email to confirm your account, then sign in.");
+    if (res.error) {
+      const m = errorMessage(res.error);
+      return setMsg(/invalid login/i.test(m) ? "Wrong username or password." : /already registered/i.test(m) ? "That username is taken." : m);
+    }
+    if (mode === "up" && !res.data.session) return setMsg("Account created, but email confirmation is on in Supabase. Turn it off (Authentication → Providers → Email) and sign in.");
     router.replace("/projects");
   }
 
@@ -45,8 +58,16 @@ export function SignIn() {
           <p className="mt-1 text-ink-2">Frame-accurate review, with cut requests your clients can preview.</p>
         </div>
         <label className="block space-y-1">
-          <span className="label">Email</span>
-          <input className="input" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <span className="label">Username</span>
+          <input
+            className="input"
+            required
+            autoComplete="username"
+            autoCapitalize="off"
+            spellCheck={false}
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+          />
         </label>
         <label className="block space-y-1">
           <span className="label">Password</span>
@@ -67,6 +88,7 @@ export function SignIn() {
         <button type="button" className="w-full text-sm text-ink-2 hover:text-ink" onClick={() => setMode(mode === "in" ? "up" : "in")}>
           {mode === "in" ? "First time? Create your editor account" : "Have an account? Sign in"}
         </button>
+        <p className="text-xs text-ink-3">This sign-in is for you, the editor. Clients never sign in: they open your share link and type their name.</p>
       </form>
     </main>
   );
