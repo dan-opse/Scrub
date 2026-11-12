@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Modal } from "./review/Dialogs";
 import { supabase, api, errorMessage } from "@/lib/client/supabase";
 import { useEditorSession } from "./useEditorSession";
 import type { Project } from "@/lib/types";
@@ -71,7 +72,10 @@ type Row = Project & { assets: { count: number }[] };
 export function ProjectsPage() {
   const user = useEditorSession();
   const [projects, setProjects] = useState<Row[] | null>(null);
+  const [query, setQuery] = useState("");
+  const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
+  const router = useRouter();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,11 +98,14 @@ export function ProjectsPage() {
   async function create(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
-    const { error } = await supabase().from("projects").insert({ name: name.trim() });
+    const { data, error } = await supabase().from("projects").insert({ name: name.trim() }).select("id").single();
     if (error) return setError(errorMessage(error));
     setName("");
-    load();
+    setCreating(false);
+    router.push(`/projects/${data.id}`);
   }
+
+  const shown = (projects ?? []).filter((p) => p.name.toLowerCase().includes(query.trim().toLowerCase()));
 
   async function rename(id: string, newName: string) {
     setRenaming(null);
@@ -123,18 +130,44 @@ export function ProjectsPage() {
     <>
       <TopBar />
       <main className="mx-auto w-full max-w-4xl space-y-6 p-6">
-        <form onSubmit={create} className="flex gap-2">
-          <input className="input" placeholder="New project name, e.g. Acme brand film" value={name} onChange={(e) => setName(e.target.value)} />
-          <button className="btn btn-primary shrink-0">New project</button>
-        </form>
+        <div className="flex gap-2">
+          <input
+            type="search"
+            className="input"
+            placeholder="Search projects…"
+            aria-label="Search projects"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <button className="btn btn-primary shrink-0" onClick={() => setCreating(true)}>
+            New project
+          </button>
+        </div>
+        {creating && (
+          <Modal title="New project" onClose={() => setCreating(false)}>
+            <form onSubmit={create} className="space-y-3">
+              <input className="input" placeholder="Project name" aria-label="Project name" autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+              <div className="flex justify-end gap-2">
+                <button type="button" className="btn btn-ghost" onClick={() => setCreating(false)}>
+                  Cancel
+                </button>
+                <button className="btn btn-primary" disabled={!name.trim()}>
+                  Create
+                </button>
+              </div>
+            </form>
+          </Modal>
+        )}
         {error && <p className="text-cut">{error}</p>}
         {projects === null ? (
           <p className="text-ink-3">Loading…</p>
         ) : projects.length === 0 ? (
-          <p className="text-ink-2">No projects yet. Create one, then upload your first cut.</p>
+          <p className="text-ink-2">No projects yet. Click New project, then upload your first cut.</p>
+        ) : shown.length === 0 ? (
+          <p className="text-ink-2">No projects match “{query}”.</p>
         ) : (
           <ul className="grid gap-3 sm:grid-cols-2">
-            {projects.map((p) => (
+            {shown.map((p) => (
               <li key={p.id} className="card group relative p-4 hover:border-line-2">
                 {renaming === p.id ? (
                   <form
