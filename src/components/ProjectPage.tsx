@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase, api, errorMessage } from "@/lib/client/supabase";
 import { useEditorSession } from "./useEditorSession";
@@ -27,6 +27,9 @@ export function ProjectPage() {
   const [counts, setCounts] = useState<Record<string, { notes: number; cuts: number }>>({});
   const [approvals, setApprovals] = useState<Record<string, { decision: string; author_name: string }>>({});
   const [uploading, setUploading] = useState(false);
+  const [droppedFile, setDroppedFile] = useState<File | undefined>(undefined);
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
   const [editingTc, setEditingTc] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -119,13 +122,46 @@ export function ProjectPage() {
     }
   }
 
+  function startUpload(f?: File) {
+    setDroppedFile(f);
+    setUploading(true);
+  }
+
+  // The whole page takes a dropped video while no upload is open; the drop zone lights up as feedback.
+  const hasFiles = (e: React.DragEvent) => e.dataTransfer.types.includes("Files");
+  const dropHandlers = uploading
+    ? {}
+    : {
+        onDragEnter: (e: React.DragEvent) => {
+          if (!hasFiles(e)) return;
+          dragDepth.current++;
+          setDragging(true);
+        },
+        onDragLeave: (e: React.DragEvent) => {
+          if (!hasFiles(e)) return;
+          dragDepth.current = Math.max(0, dragDepth.current - 1);
+          if (dragDepth.current === 0) setDragging(false);
+        },
+        onDragOver: (e: React.DragEvent) => {
+          if (hasFiles(e)) e.preventDefault();
+        },
+        onDrop: (e: React.DragEvent) => {
+          if (!hasFiles(e)) return;
+          e.preventDefault();
+          dragDepth.current = 0;
+          setDragging(false);
+          const f = e.dataTransfer.files[0];
+          if (f) startUpload(f);
+        },
+      };
+
   return (
     <>
       <TopBar>
         <span className="text-ink-3">/</span>
         <span className="truncate">{project?.name}</span>
       </TopBar>
-      <main className="mx-auto w-full max-w-4xl space-y-5 p-6">
+      <main className="mx-auto min-h-[calc(100vh-4rem)] w-full max-w-4xl space-y-5 p-6" {...dropHandlers}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="text-sm text-ink-2">
             Default start timecode:{" "}
@@ -146,7 +182,7 @@ export function ProjectPage() {
             )}
           </div>
           {!uploading && (
-            <button className="btn btn-primary" onClick={() => setUploading(true)}>
+            <button className="btn btn-primary" onClick={() => startUpload()}>
               Upload video
             </button>
           )}
@@ -156,18 +192,21 @@ export function ProjectPage() {
           <UploadPanel
             projectId={project.id}
             defaultStartTc={project.default_start_tc}
+            initialFile={droppedFile}
             onDone={(assetId) => router.push(`/assets/${assetId}`)}
             onCancel={() => {
               setUploading(false);
+              setDroppedFile(undefined);
               load();
             }}
           />
         )}
+        {!uploading && assets !== null && (
+          <DropZone large={assets.length === 0} active={dragging} onFile={startUpload} />
+        )}
         {assets === null ? (
           <p className="text-ink-3">Loading…</p>
-        ) : assets.length === 0 && !uploading ? (
-          <p className="text-ink-2">No videos yet. Upload an H.264 or H.265 export to start a review.</p>
-        ) : (
+        ) : assets.length === 0 ? null : (
           <ul className="divide-y divide-line rounded-lg border border-line">
             {assets.map((a) => {
               const versions = [...a.versions].sort((m, n) => n.number - m.number);
@@ -258,5 +297,46 @@ export function ProjectPage() {
         )}
       </main>
     </>
+  );
+}
+
+/** Click to browse or drop a video. Large and centred on an empty project, a slim strip above the list otherwise. */
+function DropZone({ large, active, onFile }: { large: boolean; active: boolean; onFile: (f: File) => void }) {
+  return (
+    <label
+      className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed text-center transition-colors ${
+        large ? "min-h-[50vh] p-10" : "p-6"
+      } ${active ? "border-accent bg-accent/10" : "border-line-2 hover:border-ink-3 hover:bg-panel"}`}
+    >
+      <input
+        type="file"
+        accept="video/mp4,video/quicktime,.mp4,.mov"
+        className="sr-only"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) onFile(f);
+        }}
+      />
+      <svg
+        aria-hidden
+        viewBox="0 0 24 24"
+        className={`${large ? "h-10 w-10" : "h-6 w-6"} ${active ? "text-accent" : "text-ink-3"}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M12 16V4m0 0-4 4m4-4 4 4" />
+        <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+      </svg>
+      <span className={large ? "text-base font-medium" : "font-medium"}>
+        {active ? "Drop to upload" : large ? "Drag and drop a video here" : "Drop a video here to add it"}
+      </span>
+      <span className="text-ink-2">
+        or <span className="text-accent underline-offset-2 hover:underline">browse files</span> · H.264 or H.265, MP4 or MOV, up to 50 GB
+      </span>
+    </label>
   );
 }

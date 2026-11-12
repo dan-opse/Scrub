@@ -14,13 +14,15 @@ type Props = {
   assetId?: string;
   /** An interrupted version to resume: the editor must drop the same file again. */
   resume?: { versionId: string; filename: string; bytes: number };
+  /** A file already chosen (e.g. dropped on the project page): inspected as soon as the panel opens. */
+  initialFile?: File;
   onDone: (assetId: string) => void;
   onCancel?: () => void;
 };
 
 const mb = (b: number) => (b >= 1e9 ? `${(b / 1e9).toFixed(2)} GB` : `${(b / 1e6).toFixed(0)} MB`);
 
-export function UploadPanel({ projectId, defaultStartTc, assetId, resume, onDone, onCancel }: Props) {
+export function UploadPanel({ projectId, defaultStartTc, assetId, resume, initialFile, onDone, onCancel }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [probe, setProbe] = useState<Probe | null>(null);
   const [probing, setProbing] = useState(0);
@@ -48,9 +50,22 @@ export function UploadPanel({ projectId, defaultStartTc, assetId, resume, onDone
 
   const [tcSource, setTcSource] = useState<"file" | "project">("project");
   const [quota, setQuota] = useState<{ used: number; allowance: number; maxFile: number } | null>(null);
+  const [quotaChecked, setQuotaChecked] = useState(false);
   useEffect(() => {
-    api<{ used: number; allowance: number; maxFile: number }>("/api/storage", {}).then(setQuota).catch(() => undefined);
+    api<{ used: number; allowance: number; maxFile: number }>("/api/storage", {})
+      .then(setQuota)
+      .catch(() => undefined)
+      .finally(() => setQuotaChecked(true));
   }, []);
+
+  // A file handed in from outside is picked once the storage check has loaded, so the quota guard applies.
+  const pickedInitial = useRef(false);
+  useEffect(() => {
+    if (!initialFile || !quotaChecked || pickedInitial.current) return;
+    pickedInitial.current = true;
+    pick(initialFile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per handed-in file
+  }, [initialFile, quotaChecked]);
 
   async function pick(f: File) {
     setError(null);
