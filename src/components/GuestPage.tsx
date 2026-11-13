@@ -75,7 +75,7 @@ export function GuestPage() {
   }
 
   if (assetId && access && userId) {
-    return <Review assetId={assetId} me={{ id: userId, name: access.display_name, role: "guest" }} access={access} />;
+    return <Review assetId={assetId} me={{ id: userId, name: access.display_name, role: "guest" }} access={access} editorName={info?.editor_name ?? null} />;
   }
 
   return (

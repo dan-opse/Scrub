@@ -272,6 +272,7 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
     ["Ctrl or ⌘ + scroll", "Zoom around the mouse"],
     ["Alt while dragging", "Turn off snapping"],
     ["M / F", "Mute / fullscreen"],
+    ["Backspace", "Discard the cut you're drawing"],
     ["Esc", "Cancel, clear range, leave cut mode"],
   ];
   return (

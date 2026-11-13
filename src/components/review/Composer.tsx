@@ -140,9 +140,15 @@ function CutConfirm(p: Omit<Props, "inputRef"> & { draft: Range }) {
             submit();
           }
           if (e.key === "Escape") p.onCutCancel();
+          // Backspace on an empty reason throws the draft away, like Backspace on the timeline.
+          if ((e.key === "Backspace" || e.key === "Delete") && reason === "") {
+            e.preventDefault();
+            p.onCutCancel();
+          }
         }}
       />
-      <div className="flex justify-end gap-2">
+      <div className="flex items-center justify-end gap-2">
+        <span className="mr-auto text-xs text-ink-3">Backspace or Esc to discard</span>
         <button className="btn btn-ghost btn-sm" onClick={p.onCutCancel}>
           Cancel
         </button>

@@ -19,6 +19,8 @@ type Props = {
   joins: number[]; // preview-mode join points, in displayed frames
   preview: boolean;
   cutMode: boolean;
+  /** This viewer may request cuts (dragging in the cut lane creates one). */
+  canCut: boolean;
   draft: Range | null;
   inOut: { in: number | null; out: number | null };
   selectedId: string | null;
@@ -36,9 +38,9 @@ type Drag =
   | { kind: "draft-edge"; edge: "start" | "end" }
   | { kind: "cut-edge"; id: string; edge: "start" | "end"; range: Range };
 
-const LANE_NOTES = 18;
-const LANE_CUTS = 22;
-const LANE_SCRUB = 30;
+const LANE_NOTES = 22;
+const LANE_CUTS = 46;
+const LANE_SCRUB = 34;
 const HEIGHT = LANE_NOTES + LANE_CUTS + LANE_SCRUB + 6;
 
 export function Timeline({ ref, ...p }: Props) {
@@ -47,6 +49,9 @@ export function Timeline({ ref, ...p }: Props) {
   const [view, setView] = useState({ start: 0, span: Math.max(1, p.total) });
   const drag = useRef<Drag | null>(null);
   const [editing, setEditing] = useState<{ id: string; range: Range } | null>(null);
+  // Pointer x while hovering the cut lane (not dragging): drives the ghost cut line.
+  const [hoverX, setHoverX] = useState<number | null>(null);
+  const [dragging, setDragging] = useState(false);
   const frame = useFrame(p.store);
   const playhead = p.toDisplay(frame) ?? 0;
 
@@ -141,15 +146,23 @@ export function Timeline({ ref, ...p }: Props) {
     const y = e.clientY - box.current!.getBoundingClientRect().top;
     if (!d) {
       const inCutLane = y >= LANE_NOTES && y < LANE_NOTES + LANE_CUTS;
-      d = !p.preview && (p.cutMode || inCutLane) ? { kind: "create", anchor: snap(f, e.altKey) } : { kind: "seek" };
+      d = p.canCut && (p.cutMode || inCutLane) ? { kind: "create", anchor: snap(f, e.altKey) } : { kind: "seek" };
     }
     drag.current = d;
+    setDragging(true);
+    setHoverX(null);
     onMove(e);
   }
 
   function onMove(e: React.PointerEvent) {
     const d = drag.current;
-    if (!d) return;
+    if (!d) {
+      const rect = box.current!.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const inCutLane = p.canCut && y >= LANE_NOTES && y < LANE_NOTES + LANE_CUTS;
+      setHoverX(inCutLane ? e.clientX - rect.left : null);
+      return;
+    }
     const f = snap(pointerFrame(e), e.altKey);
     if (d.kind === "seek") {
       p.onSeek(p.fromDisplay(Math.min(f, p.total - 1)));
@@ -172,6 +185,7 @@ export function Timeline({ ref, ...p }: Props) {
   function onUp() {
     const d = drag.current;
     drag.current = null;
+    setDragging(false);
     if (!d) return;
     if (d.kind === "create" || d.kind === "draft-edge") p.onDraft(p.draft, true);
     if (d.kind === "cut-edge" && editing) {
@@ -198,6 +212,7 @@ export function Timeline({ ref, ...p }: Props) {
       onPointerMove={onMove}
       onPointerUp={onUp}
       onPointerCancel={onUp}
+      onPointerLeave={() => setHoverX(null)}
     >
       {/* note markers */}
       <div className="absolute inset-x-0 top-0" style={{ height: LANE_NOTES }}>
@@ -228,7 +243,27 @@ export function Timeline({ ref, ...p }: Props) {
       </div>
 
       {/* cut-request lane */}
-      <div className="absolute inset-x-0" style={{ top: LANE_NOTES, height: LANE_CUTS }}>
+      <div
+        className={`absolute inset-x-0 border-t ${p.canCut ? "border-dashed border-cut/30 bg-cut/[0.04] hover:bg-cut/[0.08]" : "border-transparent"}`}
+        style={{ top: LANE_NOTES, height: LANE_CUTS, cursor: p.canCut ? "crosshair" : undefined }}
+      >
+        {p.canCut && !p.draft && !dragging && (
+          <div
+            className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-1.5 text-xs font-medium transition-colors ${
+              p.cutMode || hoverX !== null ? "text-cut" : "text-cut/60"
+            }`}
+          >
+            <span aria-hidden>✂</span>
+            <span>{p.cutMode ? "Drag across the part to cut" : "Drag here to request a cut"}</span>
+          </div>
+        )}
+        {hoverX !== null && !dragging && (
+          <div className="pointer-events-none absolute inset-y-1 z-10 w-0.5 -translate-x-1/2 rounded bg-cut/70" style={{ left: hoverX }}>
+            <span className={`absolute -top-0.5 ${hoverX > width - 90 ? "right-1.5" : "left-1.5"} whitespace-nowrap rounded bg-cut px-1 text-[10px] leading-4 text-white`}>
+              {p.format(p.fromDisplay(Math.min(toFrame(hoverX), p.total - 1)))}
+            </span>
+          </div>
+        )}
         {!p.preview &&
           p.cuts.map((c) => {
             const r = editing?.id === c.id ? editing.range : { start: c.start_frame!, end: c.end_frame! };

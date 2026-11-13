@@ -5,7 +5,8 @@ import { probeFile, type Probe } from "@/lib/client/probe";
 import { uploadVersion, type UploadProgress } from "@/lib/client/uploader";
 import { makeReviewCopy, needsReviewCopy, type ReviewCopyPhase } from "@/lib/client/reviewCopy";
 import { readTimecodeTrack } from "@/lib/client/timecodeTrack";
-import { canDropFrame, timecodeToFrames, fps } from "@/lib/timecode";
+import { canDropFrame, framesToTimecode, timecodeToFrames } from "@/lib/timecode";
+import { videoDetails } from "@/lib/videoInfo";
 
 type Props = {
   projectId: string;
@@ -58,15 +59,6 @@ export function UploadPanel({ projectId, defaultStartTc, assetId, resume, initia
       .finally(() => setQuotaChecked(true));
   }, []);
 
-  // A file handed in from outside is picked once the storage check has loaded, so the quota guard applies.
-  const pickedInitial = useRef(false);
-  useEffect(() => {
-    if (!initialFile || !quotaChecked || pickedInitial.current) return;
-    pickedInitial.current = true;
-    pick(initialFile);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per handed-in file
-  }, [initialFile, quotaChecked]);
-
   async function pick(f: File) {
     setError(null);
     if (f.size > (quota?.maxFile ?? 50 * 2 ** 30)) return setError(`Files are limited to 50 GB (this one is ${mb(f.size)}).`);
@@ -98,7 +90,10 @@ export function UploadPanel({ projectId, defaultStartTc, assetId, resume, initia
     }
   }
 
-  const startFrames = probe ? timecodeToFrames(startTc, probe.rate, dropFrame && canDropFrame(probe.rate)) : 0;
+  // Start timecode isn't asked for on upload: it comes from the file's timecode track or the project default
+  // (falling back to 00:00:00:00), and can be changed later in the Export dialog.
+  const df = !!probe && dropFrame && canDropFrame(probe.rate);
+  const startFrames = probe ? (timecodeToFrames(startTc, probe.rate, df) ?? 0) : 0;
 
   async function start(f = file!, p = probe!) {
     setError(null);
@@ -131,8 +126,8 @@ export function UploadPanel({ projectId, defaultStartTc, assetId, resume, initia
             fps_den: p.rate.den,
             frame_count: p.frameCount,
             first_pts: p.firstPts,
-            start_tc_frames: startFrames ?? 0,
-            drop_frame: dropFrame && canDropFrame(p.rate),
+            start_tc_frames: startFrames,
+            drop_frame: df,
             is_vfr: p.isVfr,
             audio_codec: p.audioCodec,
             review_status: needsReviewCopy(p) ? "pending" : "not_needed",
@@ -170,6 +165,15 @@ export function UploadPanel({ projectId, defaultStartTc, assetId, resume, initia
     }
   }
 
+  // A file handed in from outside is picked once the storage check has loaded, so the quota guard applies.
+  const pickedInitial = useRef(false);
+  useEffect(() => {
+    if (!initialFile || !quotaChecked || pickedInitial.current) return;
+    pickedInitial.current = true;
+    pick(initialFile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per handed-in file
+  }, [initialFile, quotaChecked]);
+
   async function cancel() {
     abort.current?.abort();
     const v = versionRef.current?.versionId ?? resume?.versionId;
@@ -205,41 +209,28 @@ export function UploadPanel({ projectId, defaultStartTc, assetId, resume, initia
             <span className="font-medium">{file.name}</span>
             <span className="text-ink-2">{mb(file.size)}</span>
           </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-ink-2">
-            <span>{probe.videoCodec?.toUpperCase()} {probe.codecString}</span>
-            <span>{probe.width}×{probe.height}</span>
-            <span>{fps(probe.rate).toFixed(3)} fps{probe.isVfr ? " (variable)" : ""}</span>
-            <span>{probe.frameCount.toLocaleString()} frames</span>
-            <span>audio: {probe.audioCodec ?? "none"}</span>
-          </div>
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-md border border-line bg-panel-2/50 p-3 sm:grid-cols-3">
+            {[
+              ...videoDetails(probe),
+              {
+                label: "Start timecode",
+                value: framesToTimecode(startFrames, probe.rate, df),
+                sub: tcSource === "file" ? "From the file" : "Project default",
+              },
+            ].map((d) => (
+              <div key={d.label} className="min-w-0">
+                <dt className="text-[11px] uppercase tracking-wide text-ink-3">{d.label}</dt>
+                <dd className="truncate text-sm text-ink">{d.value}</dd>
+                {d.sub && <dd className="truncate text-xs text-ink-3">{d.sub}</dd>}
+              </div>
+            ))}
+          </dl>
           {probe.blockers.map((b) => (
             <p key={b} className="rounded-md border border-cut/50 bg-cut/10 p-2 text-sm">✕ {b}</p>
           ))}
           {probe.warnings.map((w) => (
             <p key={w} className="rounded-md border border-accent/40 bg-accent/10 p-2 text-sm">! {w}</p>
           ))}
-          {phase === "review" && !resume && (
-            <div className="flex flex-wrap items-end gap-3">
-              <label className="space-y-1">
-                <span className="label">Start timecode</span>
-                <input
-                  className="input w-36 font-mono"
-                  value={startTc}
-                  onChange={(e) => setStartTc(e.target.value)}
-                  aria-invalid={startFrames === null}
-                />
-              </label>
-              {canDropFrame(probe.rate) && (
-                <label className="flex items-center gap-2 pb-2 text-sm text-ink-2">
-                  <input type="checkbox" checked={dropFrame} onChange={(e) => setDropFrame(e.target.checked)} /> Drop-frame
-                </label>
-              )}
-              <p className="pb-2 text-xs text-ink-3">
-                {tcSource === "file" ? "Read from the file's timecode track." : "Match your timeline's start (usually 01:00:00:00) so exported markers line up."}
-              </p>
-            </div>
-          )}
-          {startFrames === null && <p className="text-sm text-cut">Enter timecode as HH:MM:SS:FF.</p>}
         </div>
       )}
 
@@ -282,7 +273,7 @@ export function UploadPanel({ projectId, defaultStartTc, assetId, resume, initia
           </button>
         )}
         {phase === "review" && !resume && (
-          <button className="btn btn-primary" disabled={!probe || probe.blockers.length > 0 || startFrames === null} onClick={() => start()}>
+          <button className="btn btn-primary" disabled={!probe || probe.blockers.length > 0} onClick={() => start()}>
             Upload
           </button>
         )}

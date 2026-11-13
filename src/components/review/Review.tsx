@@ -16,6 +16,7 @@ import { usePlayer, useFrame, type FrameStore, type Player } from "./usePlayer";
 import { useComments } from "./useComments";
 import { useApprovals } from "./useApprovals";
 import { ApprovalBar } from "./ApprovalBar";
+import { GuestIntro } from "./GuestIntro";
 import { EarlierRequests, ResolveDialog } from "./VersionCarryover";
 import { Timeline, type TimelineHandle } from "./Timeline";
 import { Sidebar, type PreviewPreset, type Tab } from "./Sidebar";
@@ -27,7 +28,7 @@ import { makeReviewCopy, type ReviewCopyPhase } from "@/lib/client/reviewCopy";
 
 type Me = { id: string; name: string; role: "editor" | "guest" };
 
-export function Review({ assetId, me, access }: { assetId: string; me: Me; access: Access }) {
+export function Review({ assetId, me, access, editorName = null }: { assetId: string; me: Me; access: Access; editorName?: string | null }) {
   const editor = me.role === "editor";
   const [asset, setAsset] = useState<{ name: string; project_id: string } | null>(null);
   const [project, setProject] = useState<{ name: string; default_start_tc: string } | null>(null);
@@ -75,7 +76,10 @@ export function Review({ assetId, me, access }: { assetId: string; me: Me; acces
             ← {project?.name ?? "Projects"}
           </Link>
         ) : (
-          <span className="font-semibold">Scrub</span>
+          <span className="flex items-center gap-2">
+            <span className="font-semibold">Scrub</span>
+            <span className="rounded-full border border-accent/50 bg-accent/15 px-2 py-0.5 text-xs font-medium text-accent">Client review</span>
+          </span>
         )}
         <span className="font-medium">{asset?.name}</span>
         {versions.filter((v) => v.status === "ready").length > 1 && (
@@ -107,9 +111,20 @@ export function Review({ assetId, me, access }: { assetId: string; me: Me; acces
               </button>
             </>
           )}
-          {!editor && <span className="text-sm text-ink-2">Reviewing as {me.name}</span>}
+          {!editor && (
+            <span className="flex items-center gap-2 text-sm text-ink-2">
+              <span aria-hidden className="flex h-6 w-6 items-center justify-center rounded-full bg-accent/20 text-xs font-semibold text-accent">
+                {me.name.trim().charAt(0).toUpperCase()}
+              </span>
+              <span>
+                Reviewing as <span className="font-medium text-ink">{me.name}</span>
+              </span>
+            </span>
+          )}
         </div>
       </header>
+
+      {!editor && <GuestIntro editorName={editorName} canComment={access.allow_comments} />}
 
       {loadError && <p className="p-4 text-cut">{loadError}</p>}
 
@@ -575,6 +590,14 @@ function VersionReview({
         case "?":
           setDialog("keys");
           return;
+        case "Backspace":
+        case "Delete":
+          // Discards an unsaved cut only; saved cut requests are never deleted by a keypress.
+          if (draft || cutMode) {
+            e.preventDefault();
+            cancelCut();
+          }
+          return;
         case "Escape":
           cancelCut();
           setIn(null);
@@ -723,6 +746,7 @@ function VersionReview({
           joins={joins}
           preview={previewOn}
           cutMode={cutMode && access.allow_comments}
+          canCut={access.allow_comments && !previewOn}
           draft={draft}
           inOut={{ in: inPoint, out: outPoint }}
           selectedId={selectedId}
@@ -770,7 +794,7 @@ function VersionReview({
             >
               Set end here
             </button>
-            <span className="text-ink-3">Esc to cancel</span>
+            <span className="text-ink-3">Backspace or Esc to cancel</span>
           </div>
         )}
       </section>
