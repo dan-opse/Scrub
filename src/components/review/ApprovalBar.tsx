@@ -11,6 +11,8 @@ type Props = {
   versionLabel: string;
   comments: Comment[]; // top-level, this version
   onDecide: (decision: Approval["decision"], note: string) => Promise<void>;
+  /** Opens the comment box in "general" (not pinned to a frame) mode. Null when commenting is off. */
+  onGeneralNotes: (() => void) | null;
 };
 
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -32,18 +34,18 @@ export function ApprovalBar(p: Props) {
       ) : (
         <span className="text-xs text-ink-3">Not yet approved</span>
       )}
-      {p.canApprove && (
-        <span className="ml-auto flex gap-1.5">
-          {!approved && (
-            <button className="btn btn-sm border-good text-good" onClick={() => setOpen("approved")}>
-              Approve {p.versionLabel}
-            </button>
-          )}
-          <button className="btn btn-sm" onClick={() => setOpen("changes_requested")}>
-            Request changes
+      <span className="ml-auto flex gap-1.5">
+        {p.onGeneralNotes && (
+          <button className="btn btn-sm" onClick={p.onGeneralNotes} title="A comment about the whole video, not a specific moment">
+            General notes
           </button>
-        </span>
-      )}
+        )}
+        {p.canApprove && !approved && (
+          <button className="btn btn-sm border-good text-good" onClick={() => setOpen("approved")}>
+            Approve {p.versionLabel}
+          </button>
+        )}
+      </span>
       {open && <DecisionDialog decision={open} {...p} onClose={() => setOpen(null)} />}
       {history && (
         <Modal title="Approval history" onClose={() => setHistory(false)}>

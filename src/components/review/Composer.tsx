@@ -19,6 +19,8 @@ type Props = {
   onCutCancel: () => void;
   onClearRange: () => void;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
+  /** Bumped by "General notes": switch to a general comment and focus the box. */
+  generalSignal: number;
 };
 
 export function Composer({ inputRef, ...p }: Props) {
@@ -27,6 +29,14 @@ export function Composer({ inputRef, ...p }: Props) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const captured = useRef<number | null>(null);
+  const [lastSignal, setLastSignal] = useState(p.generalSignal);
+  if (lastSignal !== p.generalSignal) {
+    setLastSignal(p.generalSignal);
+    setTimed(false);
+  }
+  useEffect(() => {
+    if (p.generalSignal) inputRef.current?.focus();
+  }, [p.generalSignal, inputRef]);
 
   if (!p.canComment) {
     return <div className="border-t border-line p-3 text-sm text-ink-3">Commenting is turned off for this link.</div>;

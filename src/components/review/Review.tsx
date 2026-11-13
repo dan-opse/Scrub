@@ -424,6 +424,7 @@ function VersionReview({
   const [outPoint, setOut] = useState<number | null>(null); // exclusive
   const [draft, setDraft] = useState<Range | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [generalSignal, setGeneralSignal] = useState(0);
   const timeline = useRef<TimelineHandle>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -594,6 +595,14 @@ function VersionReview({
           versionLabel={`v${version.number}`}
           comments={live}
           onDecide={decide}
+          onGeneralNotes={
+            access.allow_comments
+              ? () => {
+                  cancelCut();
+                  setGeneralSignal((n) => n + 1);
+                }
+              : null
+          }
         />
         <div ref={stage} className="relative flex min-h-[200px] flex-1 items-center justify-center overflow-hidden rounded-md bg-black">
           <video
@@ -742,6 +751,7 @@ function VersionReview({
           parseDuration={parseDuration}
           duration={duration}
           inputRef={composerRef}
+          generalSignal={generalSignal}
           onFocusTyping={() => {
             player.pause();
             return player.store.get();
