@@ -96,7 +96,7 @@ export function Composer({ inputRef, ...p }: Props) {
             </button>
           ) : (
             <span className="text-[11px] text-ink-3">
-              <span className="kbd">X</span> cut · <span className="kbd">I</span>/<span className="kbd">O</span> range · <span className="kbd">?</span> keys
+              <span className="kbd">I</span>/<span className="kbd">O</span> range · <span className="kbd">?</span> keys
             </span>
           )}
           <button

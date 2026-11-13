@@ -263,7 +263,7 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
     ["← / →", "Step 1 frame"],
     ["Shift + ← / →", "Step 1 second"],
     ["I / O", "Set in / out point (O includes the current frame)"],
-    ["X", "Request a cut (from I/O, or drag on the timeline)"],
+    ["Drag the red lane", "Request a cut"],
     ["Hold X while playing", "Mark a cut live; release to end it"],
     ["[ / ]", "Previous / next cut request"],
     ["C", "Write a comment"],
@@ -272,7 +272,7 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
     ["Alt while dragging", "Turn off snapping"],
     ["M / F", "Mute / fullscreen"],
     ["Backspace", "Discard the cut you're drawing"],
-    ["Esc", "Cancel, clear range, leave cut mode"],
+    ["Esc", "Discard the cut you're drawing, clear range"],
   ];
   return (
     <Modal title="Keyboard shortcuts" onClose={onClose}>

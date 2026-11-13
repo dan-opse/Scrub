@@ -422,10 +422,8 @@ function VersionReview({
   const [tab, setTab] = useState<Tab>("all");
   const [inPoint, setIn] = useState<number | null>(null);
   const [outPoint, setOut] = useState<number | null>(null); // exclusive
-  const [cutMode, setCutMode] = useState(false);
   const [draft, setDraft] = useState<Range | null>(null);
   const [confirming, setConfirming] = useState(false);
-  const holdStart = useRef<number | null>(null);
   const timeline = useRef<TimelineHandle>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -465,19 +463,9 @@ function VersionReview({
     return () => window.clearTimeout(t);
   }, [sorted, select]);
 
-  function startCutFromIO() {
-    if (ioRange) {
-      setDraft(ioRange);
-      setConfirming(true);
-      return true;
-    }
-    return false;
-  }
-
   function cancelCut() {
     setDraft(null);
     setConfirming(false);
-    setCutMode(false);
   }
 
   const playContext = (r: Range, asCut: boolean) => {
@@ -531,18 +519,6 @@ function VersionReview({
           setOut(f + 1);
           if (inPoint === null || inPoint > f) setIn(inPoint !== null && inPoint <= f ? inPoint : f);
           return;
-        case "x":
-        case "X":
-          e.preventDefault(); // the reason box opens and focuses; don't type the "x" into it
-          if (e.repeat) return;
-          if (e.shiftKey) return;
-          if (!access.allow_comments) return;
-          if (player.playing) {
-            holdStart.current = f;
-            return;
-          }
-          if (!startCutFromIO()) setCutMode((m) => !m);
-          return;
         case "[":
         case "]": {
           const list = e.key === "]" ? cuts.filter((c) => c.start_frame! > f) : [...cuts].reverse().filter((c) => c.start_frame! < f);
@@ -579,7 +555,7 @@ function VersionReview({
         case "Backspace":
         case "Delete":
           // Discards an unsaved cut only; saved cut requests are never deleted by a keypress.
-          if (draft || cutMode) {
+          if (draft) {
             e.preventDefault();
             cancelCut();
           }
@@ -591,23 +567,9 @@ function VersionReview({
           return;
       }
     };
-    const up = (e: KeyboardEvent) => {
-      if ((e.key === "x" || e.key === "X") && holdStart.current !== null) {
-        const start = holdStart.current;
-        holdStart.current = null;
-        const end = player.store.get() + 1;
-        player.pause();
-        if (end > start) {
-          setDraft({ start, end });
-          setConfirming(true);
-        }
-      }
-    };
     window.addEventListener("keydown", down);
-    window.addEventListener("keyup", up);
     return () => {
       window.removeEventListener("keydown", down);
-      window.removeEventListener("keyup", up);
     };
   });
 
@@ -707,7 +669,6 @@ function VersionReview({
           store={player.store}
           notes={notes}
           cuts={cuts}
-          cutMode={cutMode && access.allow_comments}
           canCut={access.allow_comments}
           draft={draft}
           inOut={{ in: inPoint, out: outPoint }}
@@ -723,7 +684,6 @@ function VersionReview({
             setDraft(r);
             if (final && r) {
               setConfirming(true);
-              setCutMode(false);
               setTab((t) => (t === "notes" ? "all" : t));
             }
           }}
@@ -735,9 +695,6 @@ function VersionReview({
           mode={mode}
           setMode={setMode}
           vfr={version.is_vfr}
-          cutMode={cutMode}
-          toggleCutMode={() => (cutMode ? cancelCut() : access.allow_comments && setCutMode(true))}
-          canCut={access.allow_comments}
           timeline={timeline}
           source={source}
           hasReview={hasReview}
@@ -748,36 +705,6 @@ function VersionReview({
             window.location.href = dl;
           } : null}
         />
-        {cutMode && !confirming && (
-          <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-cut">
-            <span>Drag across the timeline, or use the playhead:</span>
-            <button
-              className="btn btn-sm border-cut text-cut"
-              onClick={() => {
-                const f = player.store.get();
-                setDraft((d) => ({ start: f, end: d && d.end > f ? d.end : Math.min(fc, f + 1) }));
-              }}
-            >
-              Set start here
-            </button>
-            <button
-              className="btn btn-sm border-cut text-cut"
-              disabled={!draft}
-              onClick={() => {
-                const f = player.store.get();
-                if (!draft || f < draft.start) return;
-                const r = { start: draft.start, end: Math.min(fc, f + 1) };
-                if (r.end - r.start >= fc) return;
-                setDraft(r);
-                setConfirming(true);
-                setCutMode(false);
-              }}
-            >
-              Set end here
-            </button>
-            <span className="text-ink-3">Backspace or Esc to cancel</span>
-          </div>
-        )}
       </section>
 
       <aside className="flex min-h-[320px] w-full flex-col border-t border-line lg:w-[380px] lg:border-l lg:border-t-0">
@@ -866,9 +793,6 @@ function PlayerBar({ timeline, ...p }: {
   mode: TimeDisplay;
   setMode: (m: TimeDisplay) => void;
   vfr: boolean;
-  cutMode: boolean;
-  toggleCutMode: () => void;
-  canCut: boolean;
   timeline: React.RefObject<TimelineHandle | null>;
   source: "original" | "review" | null;
   hasReview: boolean;
@@ -921,15 +845,6 @@ function PlayerBar({ timeline, ...p }: {
 
       {/* tools */}
       <div className="flex items-center justify-end gap-0.5">
-        {p.canCut && (
-          <button
-            className={`btn btn-sm mr-1 ${p.cutMode ? "btn-cut" : "border-cut/40 text-cut"}`}
-            onClick={p.toggleCutMode}
-            title="Request a cut (X)"
-          >
-            ✂ <span className="hidden md:inline">Request cut</span>
-          </button>
-        )}
         {p.hasReview && (
           <select
             className="h-8 cursor-pointer appearance-none rounded-md bg-transparent px-2 text-xs text-ink-2 outline-none hover:bg-panel-2"

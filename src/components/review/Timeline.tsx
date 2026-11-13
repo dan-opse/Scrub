@@ -14,7 +14,6 @@ type Props = {
   store: FrameStore;
   notes: Comment[];
   cuts: Comment[];
-  cutMode: boolean;
   /** This viewer may request cuts (dragging in the cut lane creates one). */
   canCut: boolean;
   draft: Range | null;
@@ -145,7 +144,7 @@ export function Timeline({ ref, ...p }: Props) {
     const y = e.clientY - box.current!.getBoundingClientRect().top;
     if (!d) {
       const inCutLane = y < LANE_CUTS;
-      d = p.canCut && (p.cutMode || inCutLane) ? { kind: "create", anchor: snap(f, e.altKey) } : { kind: "seek" };
+      d = p.canCut && inCutLane ? { kind: "create", anchor: snap(f, e.altKey) } : { kind: "seek" };
     }
     drag.current = d;
     setDragging(true);
@@ -206,7 +205,7 @@ export function Timeline({ ref, ...p }: Props) {
     <div
       ref={box}
       className="relative w-full touch-none select-none overflow-hidden rounded-md border border-line bg-bg"
-      style={{ height: HEIGHT, cursor: p.cutMode ? "crosshair" : "pointer" }}
+      style={{ height: HEIGHT, cursor: "pointer" }}
       onPointerDown={(e) => onDown(e, null)}
       onPointerMove={onMove}
       onPointerUp={onUp}
@@ -221,11 +220,11 @@ export function Timeline({ ref, ...p }: Props) {
         {p.canCut && !p.draft && !dragging && (
           <div
             className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-1.5 text-xs font-medium transition-colors ${
-              p.cutMode || hoverX !== null ? "text-cut" : "text-cut/60"
+              hoverX !== null ? "text-cut" : "text-cut/60"
             }`}
           >
             <span aria-hidden>✂</span>
-            <span>{p.cutMode ? "Drag across the part to cut" : "Drag here to request a cut"}</span>
+            <span>Drag here to request a cut</span>
           </div>
         )}
         {hoverX !== null && !dragging && (
