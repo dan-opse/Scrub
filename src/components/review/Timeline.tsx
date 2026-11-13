@@ -82,10 +82,15 @@ export function Timeline({ ref, ...p }: Props) {
     fit: () => setView({ start: 0, span: Math.max(1, p.total) }),
   }));
 
-  // Follow the playhead when it leaves a zoomed view.
-  if (view.span < p.total && (playhead < view.start || playhead > view.start + view.span)) {
-    const next = clampView(playhead - view.span * 0.1, view.span);
-    if (next.start !== view.start) setView(next);
+  // Follow the playhead when it moves out of a zoomed view (playing, stepping, jumping to a comment).
+  // Only when the playhead itself moved: panning the view away from a still playhead must stay put.
+  const [lastPlayhead, setLastPlayhead] = useState(playhead);
+  if (lastPlayhead !== playhead) {
+    setLastPlayhead(playhead);
+    if (view.span < p.total && (playhead < view.start || playhead > view.start + view.span)) {
+      const next = clampView(playhead - view.span * 0.1, view.span);
+      if (next.start !== view.start) setView(next);
+    }
   }
 
   const px = (d: number) => ((d - view.start) / view.span) * width;
