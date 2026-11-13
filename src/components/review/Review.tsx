@@ -641,9 +641,6 @@ function VersionReview({
               </div>
             </div>
           )}
-          {source === "review" && player.decode === "ok" && (
-            <div className="absolute right-3 top-3 rounded bg-black/60 px-2 py-0.5 text-[11px] text-ink-2">Review copy (H.264)</div>
-          )}
           {urlError && <div className="absolute inset-0 flex items-center justify-center bg-black/85 p-6 text-cut">{urlError}</div>}
           {!url && !urlError && <div className="absolute text-ink-3">Loading video…</div>}
         </div>
