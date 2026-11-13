@@ -265,7 +265,6 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
     ["I / O", "Set in / out point (O includes the current frame)"],
     ["X", "Request a cut (from I/O, or drag on the timeline)"],
     ["Hold X while playing", "Mark a cut live; release to end it"],
-    ["Shift + X", "Preview without cuts"],
     ["[ / ]", "Previous / next cut request"],
     ["C", "Write a comment"],
     ["+ / − / 0", "Zoom timeline in / out / fit"],

@@ -57,7 +57,6 @@ export function usePlayer({ rate, firstPts, frameCount, url, onNetworkError }: O
   const [muted, setMuted] = useState(false);
   const [decode, setDecode] = useState<DecodeState>("idle");
 
-  const skip = useRef<Range[] | null>(null); // preview-without-cuts ranges
   const windowRef = useRef<{ to: number; skip?: Range } | null>(null); // play-in-context window
   const seekTarget = useRef<number | null>(null); // latest requested frame while a seek is in flight
   // Seek confirmation. Some files (open-GOP H.265) can't show the frames just before a keyframe
@@ -146,7 +145,7 @@ export function usePlayer({ rate, firstPts, frameCount, url, onNetworkError }: O
     return false;
   }, [store]);
 
-  /** Called for every presented frame. Handles skips, windows and seek confirmation. */
+  /** Called for every presented frame. Handles the play-as-cut skip, windows and seek confirmation. */
   const onFrame = useCallback(
     (f: number) => {
       const v = videoRef.current!;
@@ -156,8 +155,7 @@ export function usePlayer({ rate, firstPts, frameCount, url, onNetworkError }: O
       if (runConfirm(f)) return;
       if (v.paused || v.seeking) return;
       const w = windowRef.current;
-      const ranges = [...(skip.current ?? []), ...(w?.skip ? [w.skip] : [])];
-      const r = ranges.find((x) => f >= x.start - 1 && f < x.end);
+      const r = w?.skip && f >= w.skip.start - 1 && f < w.skip.end ? w.skip : null;
       if (r && !jumping.current) {
         if (r.end >= cfg.current.frameCount) {
           v.pause();
@@ -293,9 +291,6 @@ export function usePlayer({ rate, firstPts, frameCount, url, onNetworkError }: O
       setMuted: (m: boolean) => {
         if (videoRef.current) videoRef.current.muted = m;
         setMuted(m);
-      },
-      setSkipRanges: (u: Range[] | null) => {
-        skip.current = u && u.length ? u : null;
       },
       /** Play from `from` to `to`, optionally jumping over `skip` (Play in context / Play as cut). */
       playWindow: (from: number, to: number, skipRange?: Range) => {

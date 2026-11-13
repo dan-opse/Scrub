@@ -12,7 +12,6 @@ type Props = {
   parse: (s: string) => number | null;
   parseDuration: (s: string) => number | null;
   duration: (frames: number) => string;
-  preview: boolean;
   onFocusTyping: () => number; // pauses the player and returns the captured frame
   onSend: (body: string, timed: boolean, capturedFrame: number) => Promise<void>;
   onCutChange: (r: Range) => void;
@@ -53,47 +52,67 @@ export function Composer({ inputRef, ...p }: Props) {
   }
 
   return (
-    <div className="space-y-2 border-t border-line p-3">
-      <div className="flex items-center gap-2 text-xs text-ink-2">
-        <button className={`rounded px-1.5 py-0.5 ${timed ? "bg-panel-2 text-ink" : ""}`} onClick={() => setTimed(true)}>
-          {p.range ? `${p.format(p.range.start)} → ${p.format(p.range.end)}` : <>At {p.frameLabel}</>}
-        </button>
-        <button className={`rounded px-1.5 py-0.5 ${!timed ? "bg-panel-2 text-ink" : ""}`} onClick={() => setTimed(false)}>
-          General
-        </button>
-        {p.range && (
-          <button className="ml-auto text-ink-3 hover:text-ink" onClick={p.onClearRange} title="Clear in/out (Esc)">
-            clear range
+    <div className="border-t border-line p-3">
+      <div className="rounded-xl border border-line bg-bg transition-colors focus-within:border-line-2">
+        <div className="flex items-start gap-2 px-2.5 pt-2.5">
+          <button
+            className={`mt-px shrink-0 rounded px-1.5 py-0.5 font-mono text-[12px] tabular-nums transition-colors ${
+              timed ? "bg-accent/15 text-accent hover:bg-accent/25" : "bg-panel-2 text-ink-3 line-through hover:text-ink-2"
+            }`}
+            onClick={() => setTimed((t) => !t)}
+            title={timed ? "Pinned to this moment. Click to make it a general comment." : "General comment. Click to pin it to the current frame."}
+          >
+            {p.range ? (
+              <>
+                {p.format(p.range.start)} – {p.format(p.range.end)}
+              </>
+            ) : (
+              p.frameLabel
+            )}
           </button>
-        )}
+          <textarea
+            ref={inputRef}
+            className="max-h-40 min-h-[1.5rem] flex-1 resize-none bg-transparent text-sm leading-6 outline-none placeholder:text-ink-3 [field-sizing:content]"
+            rows={1}
+            placeholder={timed ? "Leave your comment…" : "Leave a general comment…"}
+            value={body}
+            onChange={(e) => {
+              if (captured.current === null && e.target.value) captured.current = p.onFocusTyping();
+              setBody(e.target.value);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+              if (e.key === "Escape") (e.target as HTMLTextAreaElement).blur();
+            }}
+          />
+        </div>
+        <div className="flex items-center gap-2 px-2.5 pb-2 pt-1.5">
+          {p.range ? (
+            <button className="text-xs text-ink-3 hover:text-ink" onClick={p.onClearRange} title="Clear in/out (Esc)">
+              × clear range
+            </button>
+          ) : (
+            <span className="text-[11px] text-ink-3">
+              <span className="kbd">X</span> cut · <span className="kbd">I</span>/<span className="kbd">O</span> range · <span className="kbd">?</span> keys
+            </span>
+          )}
+          <button
+            className="ml-auto flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-black transition-opacity disabled:opacity-30"
+            disabled={busy || !body.trim()}
+            onClick={send}
+            aria-label="Send comment"
+            title="Send (Enter)"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M5 12h14M13 6l6 6-6 6" />
+            </svg>
+          </button>
+        </div>
       </div>
-      <textarea
-        ref={inputRef}
-        className="input resize-none"
-        rows={2}
-        placeholder="Leave a comment… (Enter to send)"
-        value={body}
-        onChange={(e) => {
-          if (captured.current === null && e.target.value) captured.current = p.onFocusTyping();
-          setBody(e.target.value);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            send();
-          }
-          if (e.key === "Escape") (e.target as HTMLTextAreaElement).blur();
-        }}
-      />
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs text-ink-3">
-          <span className="kbd">X</span> request a cut · <span className="kbd">I</span>/<span className="kbd">O</span> range · <span className="kbd">?</span> keys
-        </span>
-        <button className="btn btn-primary btn-sm" disabled={busy || !body.trim()} onClick={send}>
-          Send
-        </button>
-      </div>
-      {err && <p className="text-xs text-cut">{err}</p>}
+      {err && <p className="mt-1.5 text-xs text-cut">{err}</p>}
     </div>
   );
 }

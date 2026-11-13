@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase, api, errorMessage } from "@/lib/client/supabase";
-import { union, removed, sourceToPreview, previewToSource, rangeAt, type Range } from "@/lib/ranges";
+import { union, removed, type Range } from "@/lib/ranges";
 import {
   type TimeDisplay,
   formatTime,
@@ -17,9 +17,10 @@ import { useComments } from "./useComments";
 import { useApprovals } from "./useApprovals";
 import { ApprovalBar } from "./ApprovalBar";
 import { GuestIntro } from "./GuestIntro";
+import { avatarColor, initials } from "./avatar";
 import { EarlierRequests, ResolveDialog } from "./VersionCarryover";
 import { Timeline, type TimelineHandle } from "./Timeline";
-import { Sidebar, type PreviewPreset, type Tab } from "./Sidebar";
+import { Sidebar, type Tab } from "./Sidebar";
 import { Composer } from "./Composer";
 import { ExportDialog, ShareDialog, ShortcutsDialog } from "./Dialogs";
 import { UploadPanel } from "../UploadPanel";
@@ -70,40 +71,38 @@ export function Review({ assetId, me, access, editorName = null }: { assetId: st
 
   return (
     <div className="flex h-dvh flex-col">
-      <header className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-2.5">
-        {editor ? (
-          <Link href={asset ? `/projects/${asset.project_id}` : "/projects"} className="text-ink-2 hover:text-ink">
-            ← {project?.name ?? "Projects"}
-          </Link>
-        ) : (
-          <span className="flex items-center gap-2">
-            <span className="font-semibold">Scrub</span>
-            <span className="rounded-full border border-accent/50 bg-accent/15 px-2 py-0.5 text-xs font-medium text-accent">Client review</span>
-          </span>
-        )}
-        <span className="font-medium">{asset?.name}</span>
-        {versions.filter((v) => v.status === "ready").length > 1 && (
-          <select className="input w-auto py-1" value={versionId ?? ""} onChange={(e) => setVersionId(e.target.value)} aria-label="Version">
-            {versions
-              .filter((v) => v.status === "ready")
-              .map((v) => (
-                <option key={v.id} value={v.id}>
-                  v{v.number}
-                </option>
-              ))}
-          </select>
-        )}
-        {versions.length === 1 && version && <span className="rounded bg-panel-2 px-1.5 text-sm text-ink-2">v{version.number}</span>}
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-3 py-2">
+        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
+          {editor ? (
+            <>
+              <Link
+                href={asset ? `/projects/${asset.project_id}` : "/projects"}
+                className="flex h-7 w-7 items-center justify-center rounded text-ink-2 hover:bg-panel-2 hover:text-ink"
+                aria-label="Back to project"
+              >
+                ‹
+              </Link>
+              <Link href={asset ? `/projects/${asset.project_id}` : "/projects"} className="truncate text-ink-2 hover:text-ink">
+                {project?.name ?? "Projects"}
+              </Link>
+            </>
+          ) : (
+            <>
+              <span className="font-semibold">Scrub</span>
+              <span className="rounded-full border border-accent/50 bg-accent/15 px-2 py-0.5 text-xs font-medium text-accent">Client review</span>
+            </>
+          )}
+          <span className="text-ink-3">/</span>
+          <span className="truncate font-medium">{asset?.name}</span>
+        </nav>
         <div className="ml-auto flex items-center gap-2">
-          <button className="btn btn-ghost btn-sm" onClick={() => setDialog("keys")} aria-label="Keyboard shortcuts">
-            ?
-          </button>
+          <VersionSwitcher versions={versions.filter((v) => v.status === "ready")} current={version} onChange={setVersionId} />
           {editor && (
             <>
-              <button className="btn btn-sm" onClick={() => setDialog("upload")}>
+              <button className="btn btn-ghost btn-sm" onClick={() => setDialog("upload")}>
                 New version
               </button>
-              <button className="btn btn-sm" disabled={!version} onClick={() => setDialog("export")}>
+              <button className="btn btn-ghost btn-sm" disabled={!version} onClick={() => setDialog("export")}>
                 Export
               </button>
               <button className="btn btn-primary btn-sm" onClick={() => setDialog("share")}>
@@ -113,14 +112,21 @@ export function Review({ assetId, me, access, editorName = null }: { assetId: st
           )}
           {!editor && (
             <span className="flex items-center gap-2 text-sm text-ink-2">
-              <span aria-hidden className="flex h-6 w-6 items-center justify-center rounded-full bg-accent/20 text-xs font-semibold text-accent">
-                {me.name.trim().charAt(0).toUpperCase()}
+              <span
+                aria-hidden
+                className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold text-white"
+                style={{ background: avatarColor(me.id) }}
+              >
+                {initials(me.name)}
               </span>
-              <span>
+              <span className="hidden sm:inline">
                 Reviewing as <span className="font-medium text-ink">{me.name}</span>
               </span>
             </span>
           )}
+          <button className="btn btn-ghost btn-sm" onClick={() => setDialog("keys")} aria-label="Keyboard shortcuts">
+            ?
+          </button>
         </div>
       </header>
 
@@ -364,44 +370,21 @@ function VersionReview({
   const cuts = sorted.filter((c) => c.kind === "cut" && c.status !== "withdrawn" && !c.deleted_at);
   const notes = sorted.filter((c) => c.kind === "note" && c.start_frame !== null && !c.deleted_at);
 
-  // ---- preview without cuts
-  const [preview, setPreview] = useState(false);
-  const [preset, setPreset] = useState<PreviewPreset>(editor ? "accepted" : "everyone");
-  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
-  const included = useCallback(
-    (c: Comment) => {
-      if (c.id in overrides) return overrides[c.id];
-      if (!["open", "accepted", "done"].includes(c.status)) return false;
-      if (preset === "mine") return c.author_id === me.id;
-      if (preset === "accepted") return c.status !== "open";
-      return true;
-    },
-    [overrides, preset, me.id],
+  // Runtime if every open and accepted cut request is made.
+  const removedFrames = useMemo(
+    () => removed(union(cuts.filter((c) => c.status === "open" || c.status === "accepted").map((c) => ({ start: c.start_frame!, end: c.end_frame! })))),
+    [cuts],
   );
-  const u = useMemo(() => union(cuts.filter(included).map((c) => ({ start: c.start_frame!, end: c.end_frame! }))), [cuts, included]);
-  const removedFrames = removed(u);
-  const previewOn = preview && u.length > 0;
-  useEffect(() => {
-    player.setSkipRanges(previewOn ? u : null);
-  }, [previewOn, u, player]);
+  // Frame.io-style #1, #2… in the order comments were posted, so the numbers never shift.
+  const numbers = useMemo(() => {
+    const m = new Map<string, number>();
+    [...live].sort((a, b) => a.created_at.localeCompare(b.created_at)).forEach((c, i) => m.set(c.id, i + 1));
+    return m;
+  }, [live]);
   // Development-only hook used by the frame-accuracy test harness.
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") (window as unknown as { __scrubPlayer?: unknown }).__scrubPlayer = player;
   }, [player]);
-
-  const total = previewOn ? fc - removedFrames : fc;
-  const toDisplay = useCallback((f: number) => (previewOn ? sourceToPreview(f, u) : f), [previewOn, u]);
-  const fromDisplay = useCallback((d: number) => (previewOn ? previewToSource(d, u) : d), [previewOn, u]);
-  const joins = useMemo(() => (previewOn ? u.map((r) => sourceToPreview(r.start, u)) : []), [previewOn, u]);
-
-  function togglePreview() {
-    const next = !preview;
-    setPreview(next);
-    if (next) {
-      const r = rangeAt(player.store.get(), u);
-      if (r) player.seek(Math.min(r.end, fc - 1));
-    }
-  }
 
   // ---- formatting
   const format = useCallback((f: number) => formatTime(f, vt, mode), [vt, mode]);
@@ -452,7 +435,11 @@ function VersionReview({
   const select = useCallback(
     (c: Comment) => {
       setSelectedId(c.id);
-      if (c.start_frame !== null) player.seek(c.start_frame);
+      // Jump to the comment's frame and hold there so it can be read against the picture.
+      if (c.start_frame !== null) {
+        player.pause();
+        player.seek(c.start_frame);
+      }
       document.getElementById(`c-${c.id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     },
     [player],
@@ -531,8 +518,7 @@ function VersionReview({
         case "ArrowRight": {
           e.preventDefault();
           const d = (e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? sec : 1);
-          if (previewOn) player.seek(previewToSource(Math.max(0, Math.min(total - 1, sourceToPreview(f, u) + d)), u));
-          else player.step(d);
+          player.step(d);
           return;
         }
         case "i":
@@ -549,8 +535,8 @@ function VersionReview({
         case "X":
           e.preventDefault(); // the reason box opens and focuses; don't type the "x" into it
           if (e.repeat) return;
-          if (e.shiftKey) return togglePreview();
-          if (!access.allow_comments || previewOn) return;
+          if (e.shiftKey) return;
+          if (!access.allow_comments) return;
           if (player.playing) {
             holdStart.current = f;
             return;
@@ -626,8 +612,6 @@ function VersionReview({
   });
 
   const canEdit = (c: Comment) => c.author_id === me.id && c.status === "open";
-  const runtimeBefore = fc;
-  const runtimeAfter = fc - removedFrames;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
@@ -664,9 +648,15 @@ function VersionReview({
             aria-hidden
             className={`pointer-events-none absolute inset-0 m-auto max-h-full max-w-full ${frozenVisible ? "" : "hidden"}`}
           />
-          <CutOverlay store={player.store} cuts={preview ? [] : cuts} format={duration} />
-          {previewOn && (
-            <div className="absolute left-3 top-3 rounded bg-cut px-2 py-0.5 text-xs font-medium text-white">Preview without cuts</div>
+          <CutOverlay store={player.store} cuts={cuts} format={duration} />
+          {!player.playing && url && player.decode === "ok" && (
+            <button
+              className="absolute left-1/2 top-1/2 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 pl-1 text-2xl text-white backdrop-blur-sm transition hover:bg-black/70"
+              onClick={() => player.toggle()}
+              aria-label="Play"
+            >
+              ▶
+            </button>
           )}
           {player.decode === "unsupported" && !(source === "original" && hasReview) && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/85 p-6 text-center">
@@ -711,42 +701,14 @@ function VersionReview({
           </div>
         )}
 
-        <PlayerBar
-          player={player}
-          format={format}
-          mode={mode}
-          setMode={setMode}
-          vfr={version.is_vfr}
-          previewOn={previewOn}
-          preview={preview}
-          canPreview={u.length > 0}
-          togglePreview={togglePreview}
-          clockPreview={(f) => `${formatClock(sourceToPreview(f, u), rate)} / ${formatClock(total, rate)}`}
-          cutMode={cutMode}
-          toggleCutMode={() => (cutMode ? cancelCut() : !previewOn && access.allow_comments && setCutMode(true))}
-          canCut={access.allow_comments && !previewOn}
-          timeline={timeline}
-          source={source}
-          hasReview={hasReview}
-          switchSource={switchSource}
-          download={access.allow_download ? async () => {
-            const { url: dl } = await api<{ url: string }>("/api/playback", { versionId: version.id, download: true });
-            window.location.href = dl;
-          } : null}
-        />
-
         <Timeline
           ref={timeline}
-          total={total}
-          toDisplay={toDisplay}
-          fromDisplay={fromDisplay}
+          total={fc}
           store={player.store}
-          notes={previewOn ? notes.filter((n) => !rangeAt(n.start_frame!, u)) : notes}
+          notes={notes}
           cuts={cuts}
-          joins={joins}
-          preview={previewOn}
           cutMode={cutMode && access.allow_comments}
-          canCut={access.allow_comments && !previewOn}
+          canCut={access.allow_comments}
           draft={draft}
           inOut={{ in: inPoint, out: outPoint }}
           selectedId={selectedId}
@@ -766,6 +728,25 @@ function VersionReview({
             }
           }}
           onEditCut={(id, r) => update(id, { start_frame: r.start, end_frame: r.end }).catch((e) => alert(e.message))}
+        />
+        <PlayerBar
+          player={player}
+          format={format}
+          mode={mode}
+          setMode={setMode}
+          vfr={version.is_vfr}
+          cutMode={cutMode}
+          toggleCutMode={() => (cutMode ? cancelCut() : access.allow_comments && setCutMode(true))}
+          canCut={access.allow_comments}
+          timeline={timeline}
+          source={source}
+          hasReview={hasReview}
+          switchSource={switchSource}
+          fullscreen={() => (document.fullscreenElement ? document.exitFullscreen() : stage.current?.requestFullscreen())}
+          download={access.allow_download ? async () => {
+            const { url: dl } = await api<{ url: string }>("/api/playback", { versionId: version.id, download: true });
+            window.location.href = dl;
+          } : null}
         />
         {cutMode && !confirming && (
           <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-cut">
@@ -812,15 +793,8 @@ function VersionReview({
           format={format}
           duration={duration}
           runtime={(f) => formatClock(f, rate)}
-          totals={{ count: u.length ? cuts.filter(included).length : 0, removed: removedFrames, before: runtimeBefore, after: runtimeAfter }}
-          included={included}
-          setIncluded={(id, v) => setOverrides((o) => ({ ...o, [id]: v }))}
-          preset={preset}
-          setPreset={(p) => {
-            setPreset(p);
-            setOverrides({});
-          }}
-          hiddenInPreview={(c) => c.status === "rejected"}
+          totals={{ removed: removedFrames, before: fc, after: fc - removedFrames }}
+          numbers={numbers}
           onSelect={select}
           onPlayContext={playContext}
           onStatus={(c, s, reply) => (s === "withdrawn" ? update(c.id, { status: s }) : setStatus(c.id, s, reply))}
@@ -840,7 +814,6 @@ function VersionReview({
           parse={parse}
           parseDuration={parseDuration}
           duration={duration}
-          preview={previewOn}
           inputRef={composerRef}
           onFocusTyping={() => {
             player.pause();
@@ -885,17 +858,14 @@ function VersionReview({
   );
 }
 
+const MODE_LABEL: Record<TimeDisplay, string> = { timecode: "Timecode", clock: "Time", frames: "Frames" };
+
 function PlayerBar({ timeline, ...p }: {
   player: Player;
   format: (f: number) => string;
   mode: TimeDisplay;
   setMode: (m: TimeDisplay) => void;
   vfr: boolean;
-  previewOn: boolean;
-  preview: boolean;
-  canPreview: boolean;
-  togglePreview: () => void;
-  clockPreview: (f: number) => string;
   cutMode: boolean;
   toggleCutMode: () => void;
   canCut: boolean;
@@ -903,83 +873,123 @@ function PlayerBar({ timeline, ...p }: {
   source: "original" | "review" | null;
   hasReview: boolean;
   switchSource: (s: "original" | "review") => void;
+  fullscreen: () => void;
   download: (() => Promise<void>) | null;
 }) {
   const f = useFrame(p.player.store);
   const modes: TimeDisplay[] = p.vfr ? ["clock"] : ["timecode", "clock", "frames"];
+  const icon = "flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-panel-2 hover:text-ink";
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <button className="btn btn-sm" onClick={() => p.player.step(-1)} aria-label="Previous frame" title="Previous frame (←)">
-        ◀︎|
-      </button>
-      <button className="btn btn-sm w-16" onClick={() => p.player.toggle()} aria-label={p.player.playing ? "Pause" : "Play"}>
-        {p.player.playing ? "❚❚" : "▶︎"}
-      </button>
-      <button className="btn btn-sm" onClick={() => p.player.step(1)} aria-label="Next frame" title="Next frame (→)">
-        |▶︎
-      </button>
+    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+      {/* transport */}
+      <div className="flex items-center gap-0.5">
+        <button className={`${icon} text-ink`} onClick={() => p.player.toggle()} aria-label={p.player.playing ? "Pause" : "Play"} title="Play / pause (Space)">
+          {p.player.playing ? <PauseIcon /> : <PlayIcon />}
+        </button>
+        <button className={`${icon} hidden text-xs sm:flex`} onClick={() => p.player.step(-1)} aria-label="Previous frame" title="Previous frame (←)">
+          ◀︎|
+        </button>
+        <button className={`${icon} hidden text-xs sm:flex`} onClick={() => p.player.step(1)} aria-label="Next frame" title="Next frame (→)">
+          |▶︎
+        </button>
+        <select
+          className="h-8 cursor-pointer appearance-none rounded-md bg-transparent px-2 text-sm tabular-nums text-ink-2 outline-none hover:bg-panel-2 hover:text-ink"
+          value={p.player.playbackRate}
+          onChange={(e) => p.player.setRate(Number(e.target.value))}
+          aria-label="Speed"
+        >
+          {[0.25, 0.5, 1, 1.5, 2].map((r) => (
+            <option key={r} value={r}>
+              {r.toFixed(r < 1 ? 2 : 1)}x
+            </option>
+          ))}
+        </select>
+        <button className={icon} onClick={() => p.player.setMuted(!p.player.muted)} aria-label={p.player.muted ? "Unmute" : "Mute"} title="Mute (M)">
+          <VolumeIcon muted={p.player.muted} />
+        </button>
+      </div>
+
+      {/* timecode */}
       <button
-        className="min-w-[8.5rem] rounded px-2 py-1 text-left font-mono text-sm tabular-nums hover:bg-panel-2"
+        className="group flex items-center gap-2 rounded-md border border-line bg-panel px-3 py-1 hover:border-line-2"
         title="Change time display"
         onClick={() => p.setMode(modes[(modes.indexOf(p.mode) + 1) % modes.length])}
       >
-        {p.format(f)}
+        <span className="font-mono text-base tabular-nums sm:text-lg">{p.format(f)}</span>
+        {modes.length > 1 && <span className="text-[10px] uppercase tracking-wide text-ink-3 group-hover:text-ink-2">{MODE_LABEL[p.mode]}</span>}
       </button>
-      {p.previewOn && <span className="font-mono text-xs text-cut">{p.clockPreview(f)}</span>}
-      <select className="input w-auto py-1 text-xs" value={p.player.playbackRate} onChange={(e) => p.player.setRate(Number(e.target.value))} aria-label="Speed">
-        {[0.25, 0.5, 1, 1.5, 2].map((r) => (
-          <option key={r} value={r}>
-            {r}×
-          </option>
-        ))}
-      </select>
-      <button className="btn btn-sm" onClick={() => p.player.setMuted(!p.player.muted)} aria-label={p.player.muted ? "Unmute" : "Mute"}>
-        {p.player.muted ? "🔇" : "🔊"}
-      </button>
-      {p.hasReview && (
-        <select
-          className="input w-auto py-1 text-xs"
-          value={p.source ?? "original"}
-          onChange={(e) => p.switchSource(e.target.value as "original" | "review")}
-          aria-label="Which file to play"
-          title="The review copy is a lighter H.264 version with identical frame numbers"
-        >
-          <option value="original">Original</option>
-          <option value="review">Review copy</option>
-        </select>
-      )}
-      {p.download && (
-        <button className="btn btn-sm" onClick={p.download} title="Download the original file">
-          ⤓
-        </button>
-      )}
-      <div className="ml-auto flex items-center gap-2">
-        <button
-          className={`btn btn-sm ${p.cutMode ? "btn-cut" : ""}`}
-          disabled={!p.canCut}
-          onClick={p.toggleCutMode}
-          title="Request a cut (X)"
-        >
-          ✂ Cut
-        </button>
-        <button
-          className={`btn btn-sm ${p.preview && p.canPreview ? "border-cut text-cut" : ""}`}
-          disabled={!p.canPreview}
-          onClick={p.togglePreview}
-          title="Preview without cuts (Shift+X)"
-        >
-          {p.preview && p.canPreview ? "Previewing without cuts" : "Preview without cuts"}
-        </button>
-        <span className="hidden items-center gap-1 sm:flex">
-          <button className="btn btn-sm" onClick={() => timeline.current?.zoomOut()} aria-label="Zoom out">
-            −
+
+      {/* tools */}
+      <div className="flex items-center justify-end gap-0.5">
+        {p.canCut && (
+          <button
+            className={`btn btn-sm mr-1 ${p.cutMode ? "btn-cut" : "border-cut/40 text-cut"}`}
+            onClick={p.toggleCutMode}
+            title="Request a cut (X)"
+          >
+            ✂ <span className="hidden md:inline">Request cut</span>
           </button>
-          <button className="btn btn-sm" onClick={() => timeline.current?.zoomIn()} aria-label="Zoom in">
-            +
+        )}
+        {p.hasReview && (
+          <select
+            className="h-8 cursor-pointer appearance-none rounded-md bg-transparent px-2 text-xs text-ink-2 outline-none hover:bg-panel-2"
+            value={p.source ?? "original"}
+            onChange={(e) => p.switchSource(e.target.value as "original" | "review")}
+            aria-label="Which file to play"
+            title="The review copy is a lighter H.264 version with identical frame numbers"
+          >
+            <option value="original">Original</option>
+            <option value="review">Review copy</option>
+          </select>
+        )}
+        {p.download && (
+          <button className={icon} onClick={p.download} title="Download the original file" aria-label="Download">
+            ⤓
           </button>
-        </span>
+        )}
+        <button className={`${icon} hidden sm:flex`} onClick={() => timeline.current?.zoomOut()} aria-label="Zoom timeline out" title="Zoom out (−)">
+          −
+        </button>
+        <button className={`${icon} hidden sm:flex`} onClick={() => timeline.current?.zoomIn()} aria-label="Zoom timeline in" title="Zoom in (+)">
+          +
+        </button>
+        <button className={icon} onClick={p.fullscreen} aria-label="Fullscreen" title="Fullscreen (F)">
+          <FullscreenIcon />
+        </button>
       </div>
     </div>
+  );
+}
+
+const svg = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
+function PlayIcon() {
+  return (
+    <svg {...svg} fill="currentColor" stroke="none" aria-hidden>
+      <path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5Z" />
+    </svg>
+  );
+}
+function PauseIcon() {
+  return (
+    <svg {...svg} fill="currentColor" stroke="none" aria-hidden>
+      <rect x="6" y="4" width="4" height="16" rx="1" />
+      <rect x="14" y="4" width="4" height="16" rx="1" />
+    </svg>
+  );
+}
+function VolumeIcon({ muted }: { muted: boolean }) {
+  return (
+    <svg {...svg} aria-hidden>
+      <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+      {muted ? <path d="m16 9 5 6m0-6-5 6" /> : <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />}
+    </svg>
+  );
+}
+function FullscreenIcon() {
+  return (
+    <svg {...svg} aria-hidden>
+      <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+    </svg>
   );
 }
 
@@ -999,4 +1009,43 @@ function CutOverlay({ store, cuts, format }: { store: FrameStore; cuts: Comment[
 
 function LiveTime({ store, format }: { store: FrameStore; format: (f: number) => string }) {
   return <>{format(useFrame(store))}</>;
+}
+
+/** "‹ v2 · 2 of 3 ›", Frame.io style. Only arrows and a label: the list of versions is in the dropdown. */
+function VersionSwitcher({ versions, current, onChange }: { versions: Version[]; current: Version | null; onChange: (id: string) => void }) {
+  if (!current) return null;
+  const i = versions.findIndex((v) => v.id === current.id);
+  if (versions.length <= 1) return <span className="rounded bg-panel-2 px-2 py-1 text-xs text-ink-2">v{current.number}</span>;
+  return (
+    <div className="flex items-center overflow-hidden rounded-md border border-line bg-panel text-sm">
+      <button
+        className="px-2 py-1 text-ink-2 hover:bg-panel-2 hover:text-ink disabled:opacity-30"
+        disabled={i <= 0}
+        onClick={() => onChange(versions[i - 1].id)}
+        aria-label="Previous version"
+      >
+        ‹
+      </button>
+      <select
+        className="cursor-pointer appearance-none border-x border-line bg-transparent px-2 py-1 text-center tabular-nums outline-none hover:bg-panel-2"
+        value={current.id}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label="Version"
+      >
+        {versions.map((v, n) => (
+          <option key={v.id} value={v.id}>
+            v{v.number} · {n + 1} of {versions.length}
+          </option>
+        ))}
+      </select>
+      <button
+        className="px-2 py-1 text-ink-2 hover:bg-panel-2 hover:text-ink disabled:opacity-30"
+        disabled={i >= versions.length - 1}
+        onClick={() => onChange(versions[i + 1].id)}
+        aria-label="Next version"
+      >
+        ›
+      </button>
+    </div>
+  );
 }

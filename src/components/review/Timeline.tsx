@@ -3,21 +3,17 @@ import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type
 import type { Range } from "@/lib/ranges";
 import type { Comment } from "@/lib/types";
 import { useFrame, type FrameStore } from "./usePlayer";
+import { avatarColor, initials } from "./avatar";
 
 export type TimelineHandle = { zoomIn: () => void; zoomOut: () => void; fit: () => void };
 
 type Props = {
   ref?: Ref<TimelineHandle>;
-  /** Frames on the displayed timeline (shorter than the file in preview mode). */
+  /** Frames in the video. */
   total: number;
-  /** Source frame -> displayed frame, or null if hidden (inside a previewed cut). */
-  toDisplay: (f: number) => number | null;
-  fromDisplay: (d: number) => number;
   store: FrameStore;
   notes: Comment[];
   cuts: Comment[];
-  joins: number[]; // preview-mode join points, in displayed frames
-  preview: boolean;
   cutMode: boolean;
   /** This viewer may request cuts (dragging in the cut lane creates one). */
   canCut: boolean;
@@ -38,10 +34,13 @@ type Drag =
   | { kind: "draft-edge"; edge: "start" | "end" }
   | { kind: "cut-edge"; id: string; edge: "start" | "end"; range: Range };
 
-const LANE_NOTES = 22;
+// Top to bottom: cut-request lane, scrub bar + ruler, comment avatars.
 const LANE_CUTS = 46;
-const LANE_SCRUB = 34;
-const HEIGHT = LANE_NOTES + LANE_CUTS + LANE_SCRUB + 6;
+const LANE_SCRUB = 30;
+const LANE_NOTES = 30;
+const SCRUB_TOP = LANE_CUTS;
+const NOTES_TOP = LANE_CUTS + LANE_SCRUB;
+const HEIGHT = LANE_CUTS + LANE_SCRUB + LANE_NOTES;
 
 export function Timeline({ ref, ...p }: Props) {
   const box = useRef<HTMLDivElement>(null);
@@ -53,7 +52,7 @@ export function Timeline({ ref, ...p }: Props) {
   const [hoverX, setHoverX] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
   const frame = useFrame(p.store);
-  const playhead = p.toDisplay(frame) ?? 0;
+  const playhead = frame;
 
   useLayoutEffect(() => {
     const el = box.current!;
@@ -63,7 +62,7 @@ export function Timeline({ ref, ...p }: Props) {
     return () => ro.disconnect();
   }, []);
 
-  // Keep the view valid when the timeline length changes (preview on/off, new version).
+  // Keep the view valid when the timeline length changes (new version).
   const [lastTotal, setLastTotal] = useState(p.total);
   if (lastTotal !== p.total) {
     setLastTotal(p.total);
@@ -113,10 +112,10 @@ export function Timeline({ ref, ...p }: Props) {
   function snap(d: number, alt: boolean) {
     if (alt) return d;
     const candidates: number[] = [playhead];
-    if (p.inOut.in !== null) candidates.push(p.toDisplay(p.inOut.in) ?? -1);
-    if (p.inOut.out !== null) candidates.push(p.toDisplay(p.inOut.out) ?? -1);
-    for (const c of p.cuts) candidates.push(p.toDisplay(c.start_frame!) ?? -1, p.toDisplay(c.end_frame!) ?? -1);
-    for (const n of p.notes) if (n.start_frame !== null) candidates.push(p.toDisplay(n.start_frame) ?? -1);
+    if (p.inOut.in !== null) candidates.push(p.inOut.in);
+    if (p.inOut.out !== null) candidates.push(p.inOut.out);
+    for (const c of p.cuts) candidates.push(c.start_frame!, c.end_frame!);
+    for (const n of p.notes) if (n.start_frame !== null) candidates.push(n.start_frame);
     let best = d;
     let bestPx = 6;
     for (const c of candidates) {
@@ -145,7 +144,7 @@ export function Timeline({ ref, ...p }: Props) {
     const f = pointerFrame(e);
     const y = e.clientY - box.current!.getBoundingClientRect().top;
     if (!d) {
-      const inCutLane = y >= LANE_NOTES && y < LANE_NOTES + LANE_CUTS;
+      const inCutLane = y < LANE_CUTS;
       d = p.canCut && (p.cutMode || inCutLane) ? { kind: "create", anchor: snap(f, e.altKey) } : { kind: "seek" };
     }
     drag.current = d;
@@ -159,13 +158,13 @@ export function Timeline({ ref, ...p }: Props) {
     if (!d) {
       const rect = box.current!.getBoundingClientRect();
       const y = e.clientY - rect.top;
-      const inCutLane = p.canCut && y >= LANE_NOTES && y < LANE_NOTES + LANE_CUTS;
+      const inCutLane = p.canCut && y < LANE_CUTS;
       setHoverX(inCutLane ? e.clientX - rect.left : null);
       return;
     }
     const f = snap(pointerFrame(e), e.altKey);
     if (d.kind === "seek") {
-      p.onSeek(p.fromDisplay(Math.min(f, p.total - 1)));
+      p.onSeek(Math.min(f, p.total - 1));
     } else if (d.kind === "create") {
       const r = { start: Math.min(d.anchor, f), end: Math.max(d.anchor, f) };
       p.onDraft(r.end > r.start ? r : null, false);
@@ -201,7 +200,7 @@ export function Timeline({ ref, ...p }: Props) {
   const ticks: number[] = [];
   for (let t = Math.ceil(view.start / step) * step; t <= view.start + view.span; t += step) ticks.push(t);
 
-  const band = (r: Range) => bandFor(r, p.toDisplay, view, width);
+  const band = (r: Range) => bandFor(r, view, width);
 
   return (
     <div
@@ -214,38 +213,10 @@ export function Timeline({ ref, ...p }: Props) {
       onPointerCancel={onUp}
       onPointerLeave={() => setHoverX(null)}
     >
-      {/* note markers */}
-      <div className="absolute inset-x-0 top-0" style={{ height: LANE_NOTES }}>
-        {p.notes.map((n) => {
-          const a = p.toDisplay(n.start_frame!);
-          if (a === null) return null;
-          const b = n.end_frame !== null ? p.toDisplay(n.end_frame) : null;
-          const left = px(a);
-          if (left < -10 || left > width + 10) return null;
-          const sel = n.id === p.selectedId;
-          return (
-            <button
-              key={n.id}
-              title={`${n.author_name}: ${n.body}`}
-              aria-label={`Comment by ${n.author_name} at ${p.format(n.start_frame!)}`}
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                p.onSelect(n.id);
-              }}
-              className="absolute top-1 flex h-3 items-center"
-              style={{ left: left - 5 }}
-            >
-              {b !== null && <span className="absolute left-[5px] h-[3px] rounded bg-note/60" style={{ width: Math.max(0, px(b) - left) }} />}
-              <span className={`relative h-2.5 w-2.5 rounded-full border ${n.status === "done" ? "border-ink-3 bg-panel-2" : "border-note bg-note"} ${sel ? "ring-2 ring-white" : ""}`} />
-            </button>
-          );
-        })}
-      </div>
-
       {/* cut-request lane */}
       <div
-        className={`absolute inset-x-0 border-t ${p.canCut ? "border-dashed border-cut/30 bg-cut/[0.04] hover:bg-cut/[0.08]" : "border-transparent"}`}
-        style={{ top: LANE_NOTES, height: LANE_CUTS, cursor: p.canCut ? "crosshair" : undefined }}
+        className={`absolute inset-x-0 ${p.canCut ? "border-dashed border-cut/30 bg-cut/[0.04] hover:bg-cut/[0.08]" : "border-transparent"}`}
+        style={{ top: 0, height: LANE_CUTS, cursor: p.canCut ? "crosshair" : undefined }}
       >
         {p.canCut && !p.draft && !dragging && (
           <div
@@ -260,12 +231,11 @@ export function Timeline({ ref, ...p }: Props) {
         {hoverX !== null && !dragging && (
           <div className="pointer-events-none absolute inset-y-1 z-10 w-0.5 -translate-x-1/2 rounded bg-cut/70" style={{ left: hoverX }}>
             <span className={`absolute -top-0.5 ${hoverX > width - 90 ? "right-1.5" : "left-1.5"} whitespace-nowrap rounded bg-cut px-1 text-[10px] leading-4 text-white`}>
-              {p.format(p.fromDisplay(Math.min(toFrame(hoverX), p.total - 1)))}
+              {p.format(Math.min(toFrame(hoverX), p.total - 1))}
             </span>
           </div>
         )}
-        {!p.preview &&
-          p.cuts.map((c) => {
+        {p.cuts.map((c) => {
             const r = editing?.id === c.id ? editing.range : { start: c.start_frame!, end: c.end_frame! };
             const b = band(r);
             if (!b || b.left > width || b.left + b.width < 0) return null;
@@ -313,26 +283,50 @@ export function Timeline({ ref, ...p }: Props) {
               </div>
             );
           })()}
-        {p.preview &&
-          p.joins.map((j) => <div key={j} className="absolute top-1 bottom-1 w-0.5 bg-cut" style={{ left: px(j) }} title="Cut join" />)}
       </div>
 
       {/* scrub bar + ruler */}
-      <div className="absolute inset-x-0 border-t border-line" style={{ top: LANE_NOTES + LANE_CUTS, height: LANE_SCRUB }}>
+      <div className="absolute inset-x-0 border-t border-line bg-panel/40" style={{ top: SCRUB_TOP, height: LANE_SCRUB }}>
         {ticks.map((t) => (
           <div key={t} className="absolute top-0 h-full border-l border-line" style={{ left: px(t) }}>
-            <span className="absolute left-1 top-1 font-mono text-[10px] text-ink-3">{p.format(p.fromDisplay(Math.min(t, p.total - 1)))}</span>
+            <span className="absolute left-1 top-1 font-mono text-[10px] text-ink-3">{p.format(Math.min(t, p.total - 1))}</span>
           </div>
         ))}
-        {p.inOut.in !== null && p.toDisplay(p.inOut.in) !== null && (
+        {p.inOut.in !== null && (
           <div
             className="absolute top-0 h-full bg-accent/15"
             style={{
-              left: px(p.toDisplay(p.inOut.in)!),
-              width: Math.max(2, px(p.toDisplay(p.inOut.out ?? p.inOut.in + 1) ?? p.total) - px(p.toDisplay(p.inOut.in)!)),
+              left: px(p.inOut.in),
+              width: Math.max(2, px(p.inOut.out ?? p.inOut.in + 1) - px(p.inOut.in)),
             }}
           />
         )}
+      </div>
+
+      {/* comment avatars, Frame.io style */}
+      <div className="absolute inset-x-0 border-t border-line" style={{ top: NOTES_TOP, height: LANE_NOTES }}>
+        {p.notes.map((n) => {
+          const a = n.start_frame!;
+          const left = px(a);
+          if (left < -12 || left > width + 12) return null;
+          const sel = n.id === p.selectedId;
+          const done = n.status === "done";
+          return (
+            <button
+              key={n.id}
+              title={`${n.author_name}: ${n.body}`}
+              aria-label={`Comment by ${n.author_name} at ${p.format(a)}`}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                p.onSelect(n.id);
+              }}
+              className={`absolute top-1/2 z-10 flex h-[22px] w-[22px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[9px] font-semibold text-white shadow ring-offset-1 ring-offset-bg transition-transform hover:z-20 hover:scale-110 ${sel ? "z-20 ring-2 ring-white" : ""} ${done ? "opacity-40" : ""}`}
+              style={{ left, background: avatarColor(n.author_id ?? n.author_name) }}
+            >
+              {initials(n.author_name)}
+            </button>
+          );
+        })}
       </div>
 
       {/* zoom indicator */}
@@ -348,12 +342,9 @@ export function Timeline({ ref, ...p }: Props) {
   );
 }
 
-function bandFor(r: Range, toDisplay: (f: number) => number | null, view: { start: number; span: number }, width: number) {
-  const a = toDisplay(r.start);
-  const b = toDisplay(r.end);
-  if (a === null || b === null) return null;
-  const left = ((a - view.start) / view.span) * width;
-  const right = ((b - view.start) / view.span) * width;
+function bandFor(r: Range, view: { start: number; span: number }, width: number) {
+  const left = ((r.start - view.start) / view.span) * width;
+  const right = ((r.end - view.start) / view.span) * width;
   return { left, width: Math.max(3, right - left) };
 }
 
